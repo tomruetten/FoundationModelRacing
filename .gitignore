@@ -6,3 +6,5 @@ __pycache__/
 _git_backup/
 # benchmark outputs (regenerate; copy summary.md into the thesis notes instead)
 benchmark/results/
+# recorded sim data (large): copy to the workstation with rsync/scp
+data/

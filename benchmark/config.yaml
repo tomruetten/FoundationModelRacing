@@ -2,10 +2,10 @@
 model: configs/models/alpamayo15.yaml       # alpamayo15 | alpamayo15_flashdrive | constant_velocity
 
 data:
-  recording: ../RoboRacer-3D-Isaac-Sim/outputs/racing_bench   # output dir of: run_racing.sh ... --save-frames
+  recording: ../data     # trajectory.jsonl + frames/ (e.g. output dir of: run_racing.sh ... --save-frames)
   num_frames: 4          # frames per camera (10 Hz spacing), single front camera
-  period_s: 0.5          # spacing between samples; streaming models force 0.1 (consecutive windows)
-  max_samples: 100
+  period_s: 0.1          # spacing between samples; 0.1 = same samples for all models (streaming models require it)
+  max_samples: 150       # ~121 samples fit into the current 20 s recording
   min_speed: 0.0         # skip samples where the car is slower than this (m/s)
 
 task_prompt: "Complete one lap of the track as fast as possible."

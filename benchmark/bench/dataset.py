@@ -2,7 +2,7 @@
 
 A recording is the output directory of `racing --save-frames`:
     trajectory.jsonl   one row per dynamics tick (episode_id, step, time_s, vehicles.ego.{x,y,yaw})
-    frames/ep<E>_<step>.png   ego camera frames (20 Hz, quantised to the 50 Hz tick)
+    frames/ep<E>_[step]<step>.png   ego camera frames (20 Hz, quantised to the 50 Hz tick)
 
 Everything is resampled on the *time axis*, so the sim rate does not matter: for a sample at
 camera time t0 the model gets frames at t0-0.3..t0 (nearest recorded frame), 16 history poses
@@ -19,7 +19,7 @@ import numpy as np
 
 HZ = 10.0
 DT = 1.0 / HZ
-FRAME_RE = re.compile(r"ep(\d+)_(\d+)\.png$")
+FRAME_RE = re.compile(r"ep(\d+)_(?:step)?(\d+)\.png$")
 
 
 @dataclass
