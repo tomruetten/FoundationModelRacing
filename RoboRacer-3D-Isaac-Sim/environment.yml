@@ -1,0 +1,47 @@
+# Unified environment for the RoboRacer 3D / Isaac Sim project.
+#
+# One env covers: camera 3DGS (nerfstudio splatfacto), LiDAR 3DGS (gsplat),
+# and all vehicle-dynamics models (GRU, Deep Dynamics, MS-NN via nnodely).
+#
+# Do NOT create this with `conda env create` alone -- pip ordering matters
+# (torch first, then the prebuilt gsplat wheel, then nerfstudio, then nnodely
+# without its pinned torch). Use:
+#
+#     bash scripts/setup_env.sh
+#
+# This file documents the target; the script is the source of truth.
+#
+# Isaac Sim itself is NOT part of this env. It ships its own Python and is
+# talked to over a file-queue IPC (see README.md, "Isaac Sim").
+
+name: roboracer
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg
+  - pip:
+      # --- core ML (CUDA 12.4 wheels, work with driver >= 550) ---
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.6.0+cu124
+      - torchvision==0.21.0+cu124
+      # --- 3D Gaussian Splatting ---
+      - nerfstudio==1.1.5
+      # gsplat 1.5.3 prebuilt wheel (installed in setup_env.sh from
+      # https://docs.gsplat.studio/whl/pt24cu124, avoids 20 min CUDA JIT build)
+      - open3d==0.19.0
+      # --- data / scientific stack ---
+      - numpy<2
+      - pandas==2.0.3
+      - scipy==1.15.2
+      - matplotlib==3.10.1
+      - opencv-python==4.11.0.86
+      - scikit-learn==1.6.1
+      - pyyaml
+      - tqdm
+      - wandb
+      - pillow
+      # --- MS-NN (nnodely pins torch==2.2.2; installed with --no-deps in script) ---
+      # nnodely==1.5.4  (plus its deps: onnx, onnxruntime, reportlab, graphviz)
+      - casadi

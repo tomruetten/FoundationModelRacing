@@ -1,0 +1,240 @@
+================================================================
+  F1TENTH Car02 — Fahrzeugparameter-Übersicht
+  Stand: 2026-08-29 | Supervisor: Felix Jahncke (TUM)
+================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. PHYSIKALISCH GEMESSENE PARAMETER (2026-07-28)
+     Messmittel: SkyRC Corner Weight Scale
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Gesamtmasse         m   = 3.788 kg
+    → Vorderachse: 1860 g
+    → Hinterachse: 1928 g
+
+  Radstand            L   = 0.3225 m  (= lf + lr)
+  CoG → Vorderachse   lf  = 0.1584 m
+  CoG → Hinterachse   lr  = 0.1641 m
+
+  Schwerpunkt-Bias: CoG liegt 1.5 cm näher an der Hinterachse
+  → lr/L = 0.509  (leicht hecklastig, typisch für F1TENTH)
+
+  Quelle: deep_dynamics_car02.yaml (Zeile 8–10)
+
+  Außenmaße (per Maßband gemessen, undatiert — Fotos):
+    Breite (über Reifen)   = 0.26 m   (26 cm)
+    Länge  (über Räder)    = 0.42 m   (42 cm)
+    Reifenbreite           = 0.04 m   (4 cm)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2. AKTORIK & SENSORIK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Lenkwinkel (steering_cmd):
+    ROS-Topic:  /sensors/servo_position_command  (VESC, Servo-Einheit)
+    Umrechnung: δ [rad] = (servo - 0.5104) / (-1.1735)
+    Bereich:    servo ≈ 0.20 ~ 0.85
+                δ     ≈ ±0.29 rad  (≈ ±16.6°)
+    HINWEIS: steering_cmd in processed_data/*.csv ist BEREITS in [rad]
+             → kein Scale-Faktor nötig
+
+  Sollgeschwindigkeit (speed_cmd):
+    ROS-Topic:  /ackermann_cmd  drive.speed  [m/s]
+    Bereich:    0 ~ 3.5 m/s
+
+  Ist-Geschwindigkeit (odom_speed):
+    ROS-Topic:  /sensors/core  ERPM → m/s
+    Umrechnung: odom_speed = ERPM × ERPM_TO_MS,  ERPM_TO_MS = 1/7614.0
+    Quelle:     kalibrierter Wert aus f1tenth_stack/config/vesc.yaml
+                (speed_to_erpm_gain: 7614.0)
+    HINWEIS (Issue 6, extract_bag_for_felix.py): eine physikalische
+    Formel ergibt ~5832 statt 7614 (≈30% Abweichung) — 7614 ist der
+    korrekte, kalibrierte Wert. Betrifft NUR die odom_speed-Spalte;
+    GRU/MS-NN-Training nutzt speed_cmd, nicht odom_speed, ist also
+    von diesem Fehler nicht betroffen.
+
+  LiDAR:
+    Gerät:      Livox Mid-360 (Solid-State, Risley-Prisma, non-repetitive
+                Scanmuster — NICHT der Standard-F1TENTH-Hokuyo-2D-LiDAR)
+    ROS-Topic:  /livox/lidar  (sensor_msgs/PointCloud2)
+    Sichtfeld:  360° horizontal, ≈59° vertikal (−7° bis +52° rel. zur
+                Montageebene)
+    Scanrate:   ≈10 Hz, ≈20 000 Punkte/Scan (+ Intensitätswerte)
+    Nutzbare Reichweite: 8 m effektiv (für Indoor-Strecken in dieser
+                Arbeit, jenseits davon sinkt Punktdichte/Zuverlässigkeit)
+    Quelle:     thesis_chapter3_system_setup_en.md
+
+  IMU:
+    Gerät:      Livox Mid-360 integriertes IMU
+    ROS-Topic:  /livox/imu
+    Abtastrate: 200 Hz → downsampled auf 50 Hz
+    Achsen:     x = Längsachse (vorwärts), y = Querachse (links)
+
+  Motorstrom (current_motor):
+    ROS-Topic:  /sensors/core  current_motor  [A]
+    Vorzeichen: positiv = Antrieb, negativ = Bremsen
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3. VON MS-NN exp9 GELERNTE PHYSIKALISCHE PARAMETER
+     Modell: withax Phase2-Backup  (trained_models/msnn_exp9_phase2_backup/net.json)
+     Training: 2026-07-31 bis 2026-08-13
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Längsmodell (aₓ-Gleichung):
+    aₓ = (1/m) × (2×(T/r) − Kd×v² − Cv×v − Fy×sin(δ)) / (1 + 2Iw/(m×r²)) − Cr×g
+
+  Parameter          Init-Wert    Gelernt (exp9 P2)   Einheit   Hinweis
+  ─────────────────────────────────────────────────────────────────────
+  mass               3.788        4.155               [kg]      +9.7% über Messwert
+  r1 (eff. Radius)   0.005        0.554               [m]       eff. Triebstrang-Radius
+  Kd (Luftwiderst.)  0.0001       0.581               [–]       aerodyn. Widerstand
+  Cv (visk. Dämpf.)  0.0001      −1.724               [–]       negativ = Antrieb-Offset
+  Cr (Rollwiderst.)  0.0001      −0.0257              [–]       klein, fast Null
+  Iw1 (Rad-Trägheit) 0.0001       0.208               [kg·m²]   effektive Trägheit
+
+  INTERPRETATIONSHINWEIS:
+  - mass 4.155 vs. gemessen 3.788: Differenz ≈ 0.37 kg absorbiert
+    unmodellierte Kräfte (Reibung, Kabelzug, Fahrbahnneigung).
+  - r1 = 0.554 m ist KEIN physikalischer Reifenradius (~0.05 m bei 1:10),
+    sondern ein effektiver Skalierungsparameter für den gesamten
+    Antriebsstrang (VESC ERPM → Kraft). Das Modell konvergiert auf
+    diesen Wert durch die Trainingsdaten.
+  - Cv < 0: Das Modell nutzt diesen Term um Antriebsoffset zu kompensieren,
+    der bei niedrigen Geschwindigkeiten dominiert.
+
+  Lateralmodell (ψ̇): LocalModel mit 20 Knoten (5δ × 2vx × 2aₓ)
+    Knotenformel: vx × (k1 + k2×(δ−δ₀) + k3×(vx−v₀) + k4×(aₓ−a₀))
+    → 80 gelernte Parameter (nicht direkt physikalisch interpretierbar)
+    → Alle Werte in trained_models/msnn_exp9_phase2_backup/net.json
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  4. REFERENZ: JETSON4 PACEJKA-PARAMETER (ANDERE FAHRZEUG!)
+     Datei: JETSON4_pacejka.txt
+     ACHTUNG: Diese Werte gelten für JETSON4, NICHT für Car02!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Für zukünftige Pacejka-Kalibrierung von Car02 als Startwert:
+
+  C_Pf (Vorderreifen):  [5.7842,  1.1171, 0.75,   0.4429]
+  C_Pr (Hinterreifen):  [7.2605,  1.1886, 0.6217, 0.6702]
+  I_z:    0.0627 kg·m²   (Gierträgheit um Z-Achse)
+  h_cg:   0.02 m         (Schwerpunkthöhe)
+  l_f:    0.17 m         (CoG → Vorderachse)
+  l_r:    0.15 m         (CoG → Hinterachse)
+  l_wb:   0.32 m         (Radstand)
+  m:      3.63 kg        (Gesamtmasse)
+
+  Calibration Guide: pacejka_calibration_guide.txt (im Dynamik-Ordner)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  5. PARAMETER FÜR ISAAC SIM / BICYCLE MODEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Empfohlene Werte für Isaac Sim Fahrzeugkonfiguration:
+
+    mass:      3.788   [kg]    (gemessen, SkyRC 2026-07-28)
+    lf:        0.1584  [m]     (gemessen, CoG → Vorderachse)
+    lr:        0.1641  [m]     (gemessen, CoG → Hinterachse)
+    wheelbase: 0.3225  [m]     (= lf + lr)
+    width:     0.26    [m]     (gemessen, über Reifen)
+    length:    0.42    [m]     (gemessen, über Räder)
+    tire_width:0.04    [m]     (gemessen)
+    Iz:        0.0627  [kg·m²] (JETSON4 Referenz — Car02 nicht gemessen!)
+    h_cg:      0.02    [m]     (JETSON4 Referenz — Schätzwert)
+
+  Steuerung in Isaac Sim:
+    dt:             0.02 s   (20 ms Simulationsschritt)
+    steering_range: ±0.29 rad
+    speed_range:    0 ~ 3.5 m/s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6. FEHLENDE PARAMETER (NOCH NICHT GEMESSEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  □ Iz (Gierträgheit)       → Pendelversuch oder CAD-Modell nötig
+                               Schätzwert: 0.05–0.07 kg·m² (wie JETSON4)
+  □ Reifenradius r_tire     → mit Schieblehre messen (~0.048–0.055 m)
+  □ Pacejka-Parameter Car02 → Kalibrierung per MoCap + Optimierung
+                               Anleitung: pacejka_calibration_guide.txt
+  □ Schwerpunkthöhe h_cg    → Kippversuch oder CAD-Modell
+                               Schätzwert: ~0.02–0.04 m
+
+  [erledigt] Breite/Länge/Reifenbreite → siehe Abschnitt 1 (per Maßband)
+  [erledigt] Sensor-Montagepositionen (Kamera-/LiDAR-Höhe) → siehe Abschnitt 6b
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6b. SENSOR-MONTAGEPOSITIONEN (aus Probe 3DGS Koordinatensystem-
+      Kalibrierung, base_link-Frame — Ursprung auf Achshöhe)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  base_link: fester Referenzpunkt am Fahrzeug-Chassis auf Achshöhe,
+  von dem alle Sensor-Montageversätze gemessen werden (siehe
+  calibrate_base_mocap.py; "Livox ~11cm über base_link-Achse").
+
+  t_base←Kamera (T_BC_t, Standard-/Baseline-Wert nach Check3-Korrektur):
+    x = 0.2927 m  (nach vorne)
+    y = 0.0699 m  (seitlich)
+    z = 0.2000 m  (Kamerahöhe über base_link)
+    Quelle: build_layout00_baseline.py / build_layout03_baseline.py,
+    korrigiert in Check3 (z: 0.066 m → 0.200 m; siehe Zeile 62–64 in
+    build_layout02_slow02_baseline.py, "T_mc_z Korrektur")
+    HINWEIS: für layout_02 wurde per Hand-Eye-Kalibrierung ein leicht
+    verfeinerter Wert bestimmt: (0.2819, 0.1097, 0.1999) — Δy=+4cm,
+    siehe build_layout02_handeyecal.py. Das ist eine layout-spezifische
+    Verfeinerung, kein Widerspruch zum Baseline-Wert.
+
+  t_base←LiDAR:
+    x = 0.27 m, y = 0.00 m, z = 0.11 m  (LiDAR-Höhe über base_link)
+    Quelle: thesis_chapter3_system_setup_en.md
+
+  t_base←MoCap-Marker:
+    x = 0.10 m, y = 0.00 m, z = 0.20 m
+    Quelle: thesis_chapter3_system_setup_en.md
+
+  T_cl (Kamera←LiDAR Extrinsik, kalibriert 2026-07-14):
+    translation_xyz = (0.0686, -0.0479, -0.0192) m
+    quaternion_xyzw = (0.4743, -0.4990, 0.5080, 0.5177)
+    Residuum: 2.54° (15/16 Inlier-Ebenenpaare)
+    Definition: X_kamera = R_cl @ X_lidar + t_cl
+    Quelle: Probe/final/New1/calibration/T_cl_2026-07-14.json
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6c. KAMERA-SPEZIFIKATIONEN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Modell:       Luxonis OAK-D Pro W (Wide)
+  Anschluss:    USB (Intel Movidius MyriadX — erscheint NICHT als
+                Standard-UVC-Gerät, also nicht unter /dev/video*)
+  Sichtfeld:    ≈97° horizontal (Werksangabe, Weitwinkelobjektiv)
+                → starke radiale Verzeichnung, Bilder müssen vor
+                COLMAP/Training entzerrt werden (sonst konvergiert
+                COLMAP-Eigenkalibrierung auf falsche Parameter,
+                z.B. HFOV 61° statt 97°)
+
+  Intrinsics (nach Entzerrung, PINHOLE-Modell, Werkskalibrierung):
+    Auflösung:  1280 × 800 px
+    fx = 566.2562   fy = 565.9493
+    cx = 641.9587   cy = 388.6107
+    Quelle: Probe/scripts/build_colmap_init_from_check3.py,
+            camera_params.json (Probe/final/New1/)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  7. DATENQUELLEN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  deep_dynamics_car02.yaml   → gemessene Geometrie & Masse
+  Probe/scripts/*_baseline.py, calibrate_base_mocap.py,
+  Probe/final/New1/calibration/T_cl_2026-07-14.json
+                              → Sensor-Montagepositionen (Abschnitt 6b)
+  Probe/scripts/build_colmap_init_from_check3.py, camera_params.json,
+  Probe/final/colmap_50k_final/README_de.md
+                              → Kamera-Spezifikationen (Abschnitt 6c)
+  extract_bag_for_felix.py, f1tenth_stack/config/vesc.yaml
+                              → ERPM/VESC-Kalibrierung (Abschnitt 2)
+  thesis_chapter3_system_setup_en.md
+                              → LiDAR-Spezifikationen (Abschnitt 2)
+  JETSON4_pacejka.txt        → Pacejka-Parameter (anderes Fahrzeug)
+  trained_models/msnn_exp9_phase2_backup/net.json → gelernte Parameter
+  pacejka_calibration_guide.txt → Kalibrierungsanleitung
+
+================================================================

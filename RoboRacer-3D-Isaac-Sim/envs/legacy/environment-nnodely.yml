@@ -1,0 +1,26 @@
+# MS-NN environment (CPU-only, per dynamics/msnn/README.md)
+# Used by: dynamics/training/ MS-NN scripts, dynamics/msnn/
+#
+# Explicitly documented as CPU-only in dynamics/msnn/README.md:
+#   "pip install numpy pandas torch   (CPU-only, kein CUDA nötig)"
+# so torch here is the plain CPU build, NOT the cu124 build used in the
+# GS env — do not merge these two environments.
+
+name: nnodely-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.20
+  - pip
+  - pip:
+      - nnodely==1.5.4
+      - torch  # CPU-only build, no CUDA
+      - numpy
+      - pandas
+      - scipy
+      - matplotlib
+      - scikit-learn
+      - casadi
+      - tqdm
+      - wandb

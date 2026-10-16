@@ -1,0 +1,41 @@
+# Camera/LiDAR-3DGS + GRU/Deep Dynamics environment
+# Used by: perception/camera_gs/, perception/lidar_gs/, simulation/isaac_sim/ (render servers),
+#          dynamics/training/ GRU + Deep Dynamics scripts (torch-based, NOT MS-NN),
+#          simulation/closed_loop/ (dynamics-in-the-loop demo)
+#
+# This env was called differently on the lab machine, and some of the
+# earlier READMEs (dynamics/training, simulation/closed_loop, dynamics/msnn) still
+# say "f1tenth_dynamics" from an earlier naming pass — same environment,
+# just renamed at some point. If a script's instructions say
+# `conda activate f1tenth_dynamics`, activate this env instead.
+#
+# torch 2.6.0+cu124, nerfstudio 1.1.5, gsplat 1.5.3+pt24cu124, open3d 0.19.0
+#
+# Heads-up: nerfstudio's own install can be finicky (compiled CUDA
+# extensions via gsplat/tiny-cuda-nn). If `pip install nerfstudio==1.1.5`
+# fails here, follow the official install guide for that version instead:
+# https://docs.nerf.studio/quickstart/installation.html
+
+name: roboracer-gs
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.20
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.6.0+cu124
+      - nerfstudio==1.1.5
+      - gsplat==1.5.3+pt24cu124
+      - open3d==0.19.0
+      - numpy==1.26.0
+      - pandas==2.0.3
+      - scipy==1.15.2
+      - matplotlib==3.10.1
+      - opencv-python==4.11.0.86
+      - scikit-learn==1.6.1
+      - tqdm==4.67.1
+      - wandb==0.19.9

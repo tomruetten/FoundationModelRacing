@@ -1,0 +1,72 @@
+# F1TENTH Localisation Dataset  Camera Intrinsic Calibration
+# OAK-D Pro W  Factory calibration extracted via depthai API
+# Date: April 2026
+# Recording resolution: 1280x800 (all 16 runs)
+# THIS IS THE FILE TO USE for any algorithm processing the dataset videos.
+# See camera_intrinsics_factory_1920x1080.yaml for full-resolution factory values.
+
+# RGB Camera (CAM_A)  1280x800
+rgb:
+    width: 1280
+    height: 800
+    camera_matrix:
+      fx: 566.2562
+      fy: 565.9493
+      cx: 641.9587
+      cy: 388.6107
+      data: [566.2562, 0.0, 641.9587,
+             0.0, 565.9493, 388.6107,
+             0.0, 0.0, 1.0]
+    distortion_coefficients:
+      k1:    3.6221985816955566
+      k2:    0.9726417660713196
+      p1:    9.896762639982626e-05
+      p2:   -4.5452539779944345e-05
+      k3:    0.009347673505544662
+      k4:    3.98378849029541
+      k5:    2.0535287857055664
+      k6:    0.11342744529247284
+      s1:    0.0
+      s2:    0.0
+      s3:    0.0
+      s4:    0.0
+      taux: -0.0044837393797934055
+      tauy:  0.0002330226416233927
+    distortion_model: rational_polynomial
+    # 5-coefficient version for algorithms like ORB-SLAM3/Stella-VSLAM:
+    # [k1, k2, p1, p2, k3] = [3.6222, 0.9726, 9.897e-05, -4.545e-05, 0.009348]
+
+# Left Mono Camera (CAM_B)  640x400
+left_mono:
+    width: 640
+    height: 400
+    camera_matrix:
+      fx: 283.4812
+      fy: 283.5009
+      cx: 320.7806
+      cy: 198.9186
+      data: [283.4812, 0.0, 320.7806,
+             0.0, 283.5009, 198.9186,
+             0.0, 0.0, 1.0]
+    distortion_coefficients:
+      k1:    6.367990016937256
+      k2:    2.0447890758514404
+      p1:    0.0001642032730160281
+      p2:    7.707640179432929e-05
+      k3:    0.03601337596774101
+      k4:    6.738733768463135
+      k5:    4.019326686859131
+      k6:    0.28977522253990173
+      s1:    0.0
+      s2:    0.0
+      s3:    0.0
+      s4:    0.0
+      taux: -0.0019368421053513885
+      tauy:  0.0009537370642647147
+    distortion_model: rational_polynomial
+    # 5-coefficient version: [6.3680, 2.0448, 1.642e-04, 7.708e-05, 0.036013]
+
+# Stereo
+stereo:
+  baseline_cm: 7.5000
+  baseline_m:  0.0750

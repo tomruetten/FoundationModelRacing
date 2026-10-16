@@ -1,0 +1,179 @@
+# F1TENTH Localisation Dataset Sensor Transforms
+# Checked candidate version based on current ROS bag TF and AprilGrid camera-LiDAR calibration.
+# Units: metres and quaternions (x, y, z, w)
+#
+# IMPORTANT USAGE RULES
+# 1) When playing layout_00_slow_run_01, the bag already provides base_link -> livox_frame.
+#    Do NOT publish another conflicting base_link -> livox_frame transform.
+# 2) For ROS/RViz with this bag, publish only:
+#      livox_frame -> oak_rgb_camera_optical_frame
+# 3) base_link_to_oak_rgb_camera_optical_frame below is a composed reference transform.
+#    Use it only for downstream offline tools that require all transforms relative to base_link.
+#    Do NOT publish both livox_frame_to_oak_rgb_camera_optical_frame and
+#    base_link_to_oak_rgb_camera_optical_frame as TF at the same time.
+
+metadata:
+  dataset: layout_00_slow_run_01
+  status: project_candidate
+  created_from:
+    - ROS bag TF: base_link -> livox_frame
+    - AprilGrid camera-LiDAR visual calibration
+  camera_topic_in_bag: false
+  camera_frame_source: manually_defined_for_offline_rgb_video
+  camera_frame_name: oak_rgb_camera_optical_frame
+
+coordinate_conventions:
+  base_link:
+    convention: ROS REP-103 vehicle frame
+    axes:
+      x: forward
+      y: left
+      z: up
+  livox_frame:
+    convention: ROS REP-103 sensor frame as used in the bag
+    axes:
+      x: forward
+      y: left
+      z: up
+  oak_rgb_camera_optical_frame:
+    convention: ROS/OpenCV optical frame
+    axes:
+      x: image_right
+      y: image_down
+      z: camera_forward
+
+usage:
+  ros_runtime_with_bag:
+    play_bag: ros2 bag play /path/to/OKF1tenth/raw/layout_00_slow_run_01 --clock  # example bag, not included in this repo
+    publish_extra_camera_tf_only: >
+      ros2 run tf2_ros static_transform_publisher --x 0.02266665 --y 0.06987346 --z -0.04441125
+      --qx -0.46552296 --qy 0.48718884 --qz -0.52270603 --qw 0.52220090
+      --frame-id livox_frame --child-frame-id oak_rgb_camera_optical_frame
+    check_tf:
+      - ros2 run tf2_ros tf2_echo livox_frame oak_rgb_camera_optical_frame
+      - ros2 run tf2_ros tf2_echo base_link oak_rgb_camera_optical_frame
+  offline_projection:
+    use_matrix: T_camera_lidar
+    definition: X_camera = T_camera_lidar * X_lidar
+  offline_base_relative_tools:
+    use_transform: base_link_to_oak_rgb_camera_optical_frame
+    warning: This is derived from bag base_link_to_livox_frame plus calibrated livox_to_camera.
+
+calibration_record:
+  target: 6x6 AprilGrid
+  tag_size_m: 0.088
+  tag_spacing_ratio: 0.3
+  tag_gap_m: 0.0264
+  visual_refinement:
+    spin_correction_deg: 12.0
+    camera_y_shift_m: 0.050
+  validation:
+    board_projection_checked_on: [0112, 0113, 0114, 0115]
+    full_scene_projection: roughly_consistent_not_pixel_perfect
+  limitation: >
+    This is a visually validated project candidate. It should not be described as a final high-precision
+    camera-LiDAR calibration because most board poses were nearly vertical/parallel.
+
+transforms:
+  base_link_to_livox_frame:
+    parent: base_link
+    child: livox_frame
+    translation:
+      x: 0.27000000
+      y: 0.00000000
+      z: 0.11000000
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+    method: bag_tf_static
+    notes: >
+      This value matches the transform observed in the ROS2 bag:
+      base_link -> livox_frame translation [0.270, 0.000, 0.110].
+      The older ruler-based file used x=0.28 m; use 0.27 m for consistency with this bag.
+
+  livox_frame_to_oak_rgb_camera_optical_frame:
+    parent: livox_frame
+    child: oak_rgb_camera_optical_frame
+    translation:
+      x: 0.02266665
+      y: 0.06987346
+      z: -0.04441125
+    rotation:
+      x: -0.46552296
+      y: 0.48718884
+      z: -0.52270603
+      w: 0.52220090
+    method: aprilgrid_camera_lidar_visual_refinement
+    status: candidate
+    notes: >
+      Candidate camera-LiDAR extrinsic calibrated using AprilGrid board observations.
+      This is the transform to publish in addition to the bag TF when using ROS/RViz.
+
+  base_link_to_oak_rgb_camera_optical_frame:
+    parent: base_link
+    child: oak_rgb_camera_optical_frame
+    translation:
+      x: 0.29266665
+      y: 0.06987346
+      z: 0.06558875
+    rotation:
+      x: -0.46552296
+      y: 0.48718884
+      z: -0.52270603
+      w: 0.52220090
+    method: composed_from_bag_base_to_livox_and_calibrated_livox_to_camera
+    status: candidate_reference_only
+    notes: >
+      Composed from base_link_to_livox_frame [0.270, 0.000, 0.110] and calibrated
+      livox_frame_to_oak_rgb_camera_optical_frame. Use only if downstream software expects
+      base_link-relative sensor transforms. Do not publish this together with the livox->camera TF.
+
+  base_link_to_camera_frame_ruler_measurement:
+    parent: base_link
+    child: camera_frame
+    translation:
+      x: 0.33000000
+      y: 0.02000000
+      z: 0.09500000
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+    method: ruler_measurement_old_reference_only
+    notes: >
+      Old physical measurement from colleague. Keep only as reference. This is not a calibrated optical-frame transform.
+
+  base_link_to_mocap_frame:
+    parent: base_link
+    child: mocap_frame
+    translation:
+      x: 0.10000000
+      y: 0.00000000
+      z: 0.20000000
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+    method: ruler_measurement_old_reference_only
+    notes: >
+      Old physical measurement for marker cluster centroid. Keep as reference unless separately calibrated.
+
+  livox_frame_to_livox_imu_frame:
+    parent: livox_frame
+    child: livox_imu_frame
+    translation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+    method: assumed
+    notes: >
+      IMU is built into the Livox MID-360; assumed at same position as LiDAR frame.

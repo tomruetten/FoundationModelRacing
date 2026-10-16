@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+# original .git dirs of the embedded upstream repos (restore with: mv _git_backup/<name>.git <name>/.git)
+_git_backup/
+# benchmark outputs (regenerate; copy summary.md into the thesis notes instead)
+benchmark/results/

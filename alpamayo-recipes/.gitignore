@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache/
+.venv/
+**/.venv/
+dist/
+outputs/*
+**/outputs/
+**/wandb/
+*.egg-info
+output_stage*

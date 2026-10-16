@@ -1,0 +1,37 @@
+[
+  {
+    "name": "porsche_911",
+    "sha256": "421fdabf0da312edb3c22dc0fc915bcc75551ff0db7374a7ebac8af80efc5ea2",
+    "license": "CC BY 4.0",
+    "author": "Lionsharp Studios",
+    "source_url": "https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf",
+    "download_url": "https://raw.githubusercontent.com/playcanvas/web-components/main/examples/assets/models/porsche-911-carrera-4s.glb"
+  },
+  {
+    "name": "wooden_pallet",
+    "sha256": "1d099e376c6b63c25f2e3ca770400a3f010a42ecb146682444cf41ef8d9a32a5",
+    "license": "CC0",
+    "author": "Free poly",
+    "assetBaseId": "3822ba51-e0b0-4773-a209-9ab316d7129c",
+    "source_url": "https://www.blenderkit.com/get-blenderkit/3822ba51-e0b0-4773-a209-9ab316d7129c/",
+    "download_api": "https://www.blenderkit.com/api/v1/downloads/7cd5e930-3fb1-4e03-ad8f-9c905566ed49/"
+  },
+  {
+    "name": "wooden_crate",
+    "sha256": "d1ec3f112e08ebfe15b8f7cabf4b20d58ba5f02a02879b25f89a7558abcaa4d4",
+    "license": "CC0",
+    "author": "Poly Haven",
+    "assetBaseId": "437445a1-9841-4fd7-8c39-6a3a5e6e5ca4",
+    "source_url": "https://www.blenderkit.com/get-blenderkit/437445a1-9841-4fd7-8c39-6a3a5e6e5ca4/",
+    "download_api": "https://www.blenderkit.com/api/v1/downloads/83078375-6c92-47dc-9485-5cca8f24c144/"
+  },
+  {
+    "name": "plastic_crate",
+    "sha256": "dac4027e1e9a0e6e5039e81e8d7ce74f8f45e5230b65ea2c1a8cba3b833d5f50",
+    "license": "CC0",
+    "author": "Poly Haven",
+    "assetBaseId": "e58013cc-d93f-44fe-b775-636dc90500c1",
+    "source_url": "https://www.blenderkit.com/get-blenderkit/e58013cc-d93f-44fe-b775-636dc90500c1/",
+    "download_api": "https://www.blenderkit.com/api/v1/downloads/f0a18c87-2ad1-4820-abb6-6c8795a4bf38/"
+  }
+]

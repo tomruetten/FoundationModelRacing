@@ -1,0 +1,40 @@
+# local data-path config
+scripts/env.sh
+# raw / derived data never goes in git
+data/
+data/local/
+outputs/
+*.db3
+*.mp4
+wandb/
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+# misc
+.DS_Store
+*.bak
+
+simulation/closed_loop/v2_output/
+outputs/
+third_party/
+
+# data symlinks into data/local (machine-specific)
+dynamics/training/processed_data
+dynamics/msnn/processed_data
+dynamics/msnn/src/processed_data
+simulation/closed_loop/processed_data
+# outputs of evaluation / demo scripts
+dynamics/msnn/eval_output/
+simulation/closed_loop/v2_output/
+simulation/closed_loop/output/
+**/isaac_sim_output/
+
+# assistant working files (plans, specs, session caches); AGENTS.md stays tracked
+docs/superpowers/
+.claude/
+.codex/
+.cursor/
+.aider*
+.pytest_cache/

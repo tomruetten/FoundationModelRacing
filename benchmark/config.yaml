@@ -1,0 +1,15 @@
+# One-shot benchmark config. Switch the model by changing `model:` (or pass --model on the CLI).
+model: configs/models/alpamayo15.yaml       # alpamayo15 | alpamayo15_flashdrive | constant_velocity
+
+data:
+  recording: ../RoboRacer-3D-Isaac-Sim/outputs/racing_bench   # output dir of: run_racing.sh ... --save-frames
+  num_frames: 4          # frames per camera (10 Hz spacing), single front camera
+  period_s: 0.5          # spacing between samples; streaming models force 0.1 (consecutive windows)
+  max_samples: 100
+  min_speed: 0.0         # skip samples where the car is slower than this (m/s)
+
+task_prompt: "Complete one lap of the track as fast as possible."
+num_samples: 6           # K trajectory samples per input -> ADE on sample 0, minADE over K
+horizons_s: [2.0, 4.0, 6.4]
+warmup: 3                # first N predictions are timed but excluded from the statistics
+output_dir: results

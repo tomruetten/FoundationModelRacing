@@ -1,0 +1,7 @@
+name: alpamayo15_flashdrive
+adapter: flashdrive
+checkpoint: z-lab/Alpamayo-1.5-10B     # nvidia/... would run the original model through the same loader
+device: cuda
+num_views: 1              # front camera only; TODO verify on GPU (FlashDrive default is 4 views)
+num_frames: 4
+task_as_nav_text: true

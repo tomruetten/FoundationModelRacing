@@ -1,0 +1,10 @@
+name: alpamayo15
+adapter: alpamayo
+checkpoint: nvidia/Alpamayo-1.5-10B
+device: cuda
+cuda_graph: true          # diffusion-expert CUDA graph (see Profiling-Ergebnisse RTX 3090)
+num_samples: 6            # CUDA-graph batch size; keep equal to the top-level num_samples
+max_new_tokens: 256
+temperature: 0.6
+top_p: 0.98
+task_as_nav_text: true    # pass the task prompt as <|route_start|>..<|route_end|> (Alpamayo 1.5 nav text)

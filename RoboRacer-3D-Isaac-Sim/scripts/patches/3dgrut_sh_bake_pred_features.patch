@@ -1,0 +1,22 @@
+diff --git a/threedgrut/export/usd/post_processing/sh_bake.py b/threedgrut/export/usd/post_processing/sh_bake.py
+index b0f16ad..1b1086d 100644
+--- a/threedgrut/export/usd/post_processing/sh_bake.py
++++ b/threedgrut/export/usd/post_processing/sh_bake.py
+@@ -105,7 +105,7 @@ def _render_reference(reference_model, fixed_post_processing, gpu_batch) -> torc
+     with torch.no_grad():
+         outputs = reference_model(gpu_batch)
+         outputs = apply_post_processing(fixed_post_processing, outputs, gpu_batch, training=True)
+-        return outputs["pred_rgb"].detach()
++        return outputs.get("pred_rgb", outputs["pred_features"]).detach()  # apply_post_processing writes pred_features
+ 
+ 
+ def bake_post_processing_into_sh(
+@@ -239,7 +239,7 @@ def bake_post_processing_into_sh(
+                 optimizer.zero_grad(set_to_none=True)
+                 baked_outputs = baked_model(gpu_batch)
+                 fitted_rgb = adapter.apply_fit_transform(
+-                    baked_outputs["pred_rgb"],
++                    baked_outputs.get("pred_rgb", baked_outputs["pred_features"]),
+                     fixed_post_processing,
+                     gpu_batch,
+                 )
