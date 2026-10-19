@@ -26,11 +26,21 @@ class AlpamayoAdapter(ModelAdapter):
 
         self.helper = helper
         self.device = self.cfg.get("device", "cuda")
-        self.model = Alpamayo1_5.from_pretrained(self.cfg["checkpoint"], dtype=torch.bfloat16).to(self.device)
-        self.model.eval()
+        # The checkpoint defaults to flash_attention_2, which needs the flash_attn package (not installed
+        # in the FlashDrive env). Like flashdrive.from_pretrained, override the config explicitly.
+        attn = self.cfg.get("attn_implementation", "sdpa")
+        config = Alpamayo1_5.config_class.from_pretrained(self.cfg["checkpoint"])
+        config.attn_implementation = config._attn_implementation = attn
+        if attn == "sdpa":
+            Alpamayo1_5._supports_sdpa = True  # wrapper class does not declare it, submodels support it
+        self.model = Alpamayo1_5.from_pretrained(self.cfg["checkpoint"], config=config, dtype=torch.bfloat16)
+        self.model = self.model.to(self.device).eval()
         self.processor = helper.get_processor(self.model.tokenizer)
         if self.cfg.get("cuda_graph", False):
-            self.model.enable_diffusion_expert_cuda_graph(max_batch_size=self.cfg.get("num_samples", 6))
+            if hasattr(self.model, "enable_diffusion_expert_cuda_graph"):
+                self.model.enable_diffusion_expert_cuda_graph(max_batch_size=self.cfg.get("num_samples", 6))
+            else:
+                print("WARNING: installed alpamayo1_5 has no expert CUDA graph; running eager", flush=True)
 
         self.timer = StageTimer()
         self.timer.hook_module(self.model.vlm.model.visual, "vision")

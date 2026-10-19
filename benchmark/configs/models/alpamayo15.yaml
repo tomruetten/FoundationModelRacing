@@ -2,6 +2,7 @@ name: alpamayo15
 adapter: alpamayo
 checkpoint: nvidia/Alpamayo-1.5-10B
 device: cuda
+attn_implementation: sdpa   # flash_attention_2 needs the flash_attn package; sdpa runs everywhere (as in FlashDrive)
 cuda_graph: true          # diffusion-expert CUDA graph (see Profiling-Ergebnisse RTX 3090)
 num_samples: 6            # CUDA-graph batch size; keep equal to the top-level num_samples
 max_new_tokens: 256

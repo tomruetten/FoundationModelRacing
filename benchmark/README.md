@@ -22,6 +22,18 @@ python run_benchmark.py --set num_samples=1 --set data.max_samples=20
 ```
 Results land in `results/<model>_<timestamp>/` (`per_sample.csv`, `summary.md/json`, `config.snapshot.yaml`).
 
+## Visualise (no GPU, runs on the Mac)
+```bash
+python visualize.py --run results/<run> --idx 40 100            # selected samples
+python visualize.py --run results/<run> --every 5 --video       # PNG per 5th sample + lap.mp4
+python visualize.py --run results/<a> --run results/<b> --idx 40  # compare plans of several runs
+python visualize.py --run results/<run> --idx 40 --calibrate -0.05 -0.15 -0.25   # choose --ground-z
+```
+Left: top-down in the ego frame (history, GT, plan, other K samples, best of K). Right: last input frame with
+GT and plan projected onto the ground plane (pinhole from `racing_142014.json`, scaled to the frame size, no
+distortion). The ground height `--ground-z` (default -0.15 m in the vehicle frame) is estimated from the images;
+check it with `--calibrate`. Output: `results/<run>/viz/`. Needs matplotlib, imageio, imageio-ffmpeg.
+
 ## Add a model
 New class in `bench/adapters/` implementing `ModelAdapter` (`load`, `prepare`, `predict`), register it in
 `bench/adapters/__init__.py`, add `configs/models/<name>.yaml`.
