@@ -22,6 +22,19 @@ python run_benchmark.py --set num_samples=1 --set data.max_samples=20
 ```
 Results land in `results/<model>_<timestamp>/` (`per_sample.csv`, `summary.md/json`, `config.snapshot.yaml`).
 
+## Seeds and repeated runs
+Reasoning tokens and diffusion noise are random, so two runs of the same configuration differ (about 0.4 m ADE in our
+first runs). `seed` in `config.yaml` (default 42) seeds every sample from (seed, sample index); the order of the
+samples is always chronological.
+```bash
+python run_benchmark.py --seed 7              # single run, fixed seed
+python run_benchmark.py --seeds 1 2 3         # model is loaded once, one pass per seed
+```
+With `--seeds` the results go to `results/<model>_<tag>_3seeds_<time>/seed_<s>/` (full report per seed) plus
+`aggregate.md/json`: per-seed means, mean and std over seeds for every metric. Use the std over seeds as the noise
+level when comparing models or prompts. Bit-exact reproducibility is not guaranteed on GPU (CUDA graphs,
+quantisation, speculative decoding): check it once by running the same seed twice and comparing `predictions.npz`.
+
 ## Visualise (no GPU, runs on the Mac)
 ```bash
 python visualize.py --run results/<run> --idx 40 100            # selected samples

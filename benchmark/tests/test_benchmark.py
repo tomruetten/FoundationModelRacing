@@ -121,3 +121,44 @@ def test_resolve_repo_relative_vlm(tmp_path):
     cfg = {"vlm_name_or_path": "vlm"}
     assert resolve(cfg, str(snap), file_exists=boom, snapshot_download=boom) == str(snap)
     assert cfg["vlm_name_or_path"] == str(snap / "vlm")
+
+
+def test_sample_seed_stable_and_distinct():
+    from bench.seeding import sample_seed, set_seed
+
+    assert sample_seed(42, 5) == sample_seed(42, 5)
+    assert len({sample_seed(42, i) for i in range(200)}) == 200
+    assert sample_seed(1, 5) != sample_seed(2, 5)
+    set_seed(sample_seed(42, 5))
+    a = np.random.rand(3)
+    set_seed(sample_seed(42, 5))
+    assert np.array_equal(a, np.random.rand(3))
+
+
+def test_multi_seed_run_and_aggregate(tmp_path):
+    make_recording(tmp_path / "rec")
+    import run_benchmark as rb
+    import yaml
+
+    (tmp_path / "m.yaml").write_text(yaml.safe_dump({"name": "cv", "adapter": "constant_velocity"}))
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump({"model": "m.yaml", "data": {"recording": "rec", "period_s": 0.5,
+                                         "max_samples": 8}, "task_prompt": None, "num_samples": 2,
+                                        "warmup": 1, "output_dir": "out", "seed": 5}))
+    cfg = rb.load_config(cfg_path, None, [])
+    # single run: seed from config ends up in the report
+    single = rb.run(cfg, tmp_path)
+    assert single["meta"]["seed"] == 5
+    # several seeds: one folder per seed plus aggregate files
+    cfg["seeds"] = [1, 2, 3]
+    cfg["run_tag"] = "multi"
+    agg = rb.run(cfg, tmp_path)
+    root = next(p for p in (tmp_path / "out").iterdir() if "3seeds" in p.name)
+    for s in (1, 2, 3):
+        assert (root / f"seed_{s}" / "summary.md").exists()
+        assert yaml.safe_load((root / f"seed_{s}" / "config.snapshot.yaml").read_text())["seed"] == s
+    assert (root / "aggregate.md").exists() and (root / "aggregate.json").exists()
+    ade = agg["metrics"]["ade (m)"]
+    assert set(ade["per_seed"]) == {"1", "2", "3"}
+    # the constant-velocity baseline is deterministic: identical across seeds, std 0
+    assert ade["std_over_seeds"] == 0.0

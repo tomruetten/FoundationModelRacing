@@ -42,7 +42,7 @@ def write_report(out_dir: Path, rows: list[dict], meta: dict, horizons: list[flo
     L = summary["latency_ms"]
     md = [f"# {meta['run_name']}", "",
           f"Model: `{meta['model_name']}` ({meta.get('checkpoint', '-')}) · GPU: {meta.get('gpu', '-')} · "
-          f"K={meta['num_samples']} · scored samples: {len(timed)} / {len(rows)}", "",
+          f"K={meta['num_samples']} · seed: {meta.get('seed', '-')} · scored samples: {len(timed)} / {len(rows)}", "",
           f"Prompt: `{meta.get('task_prompt')}`", "",
           "## Latency (ms)", "", "| Stage | p50 | p90 | mean | std |", "|---|---|---|---|---|"]
     for c in LAT_COLS:

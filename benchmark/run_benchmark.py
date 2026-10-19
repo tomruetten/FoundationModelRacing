@@ -4,9 +4,12 @@
     python run_benchmark.py --config config.yaml
     python run_benchmark.py --config config.yaml --model configs/models/alpamayo15_flashdrive.yaml
     python run_benchmark.py --config config.yaml --set num_samples=1 --set data.max_samples=20
+    python run_benchmark.py --seed 7                 # one run with a fixed seed (default: seed from config.yaml)
+    python run_benchmark.py --seeds 1 2 3            # one run per seed, plus aggregate.md (mean/std over seeds)
 
 Per sample: front camera frames + ego history + task prompt -> K trajectories, timed per stage
 (vision / prefill / decode / diffusion) and scored against the driven future (ADE, minADE).
+Randomness (reasoning tokens, diffusion noise) is seeded per sample from (seed, sample index).
 """
 
 import argparse
@@ -25,9 +28,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from bench.adapters import create_adapter  # noqa: E402
+from bench.aggregate import aggregate  # noqa: E402
 from bench.dataset import build_samples  # noqa: E402
 from bench.metrics import trajectory_metrics  # noqa: E402
 from bench.report import write_report  # noqa: E402
+from bench.seeding import sample_seed, set_seed  # noqa: E402
 
 log = logging.getLogger("benchmark")
 
@@ -69,27 +74,13 @@ def gpu_name() -> str:
         return "unknown"
 
 
-def run(cfg: dict, config_dir: Path) -> dict:
-    mcfg = cfg["model_cfg"]
+def run_seed(adapter, samples, cfg: dict, seed: int, period: float, run_name: str, out_dir: Path) -> dict:
+    """One pass over all samples (chronological) with the given seed; writes the report into out_dir."""
+    mcfg, dcfg = cfg["model_cfg"], cfg["data"]
     task = cfg.get("task_prompt")
     K = int(cfg.get("num_samples", 6))
     horizons = list(cfg.get("horizons_s", [2.0, 4.0, 6.4]))
     warmup = int(cfg.get("warmup", 3))
-
-    adapter = create_adapter(mcfg, task)
-    adapter.load()
-
-    dcfg = cfg["data"]
-    period = adapter.required_period_s or float(dcfg.get("period_s", 0.5))
-    if adapter.required_period_s and dcfg.get("period_s") not in (None, adapter.required_period_s):
-        log.warning("%s needs consecutive windows; overriding data.period_s=%s with %s",
-                    mcfg["name"], dcfg.get("period_s"), period)
-    samples = build_samples(_resolve(dcfg["recording"], config_dir), num_frames=int(dcfg.get("num_frames", 4)),
-                            period_s=period, max_samples=dcfg.get("max_samples"),
-                            min_speed=float(dcfg.get("min_speed", 0.0)))
-    if not samples:
-        raise SystemExit("No samples could be built from the recording (check frames/ and trajectory.jsonl).")
-    log.info("%d samples, period %.2f s, model %s", len(samples), period, mcfg["name"])
 
     rows, prev = [], None
     saved = {"idx": [], "t0": [], "pred_xy": [], "gt_xy": [], "hist_xy": []}
@@ -99,6 +90,7 @@ def run(cfg: dict, config_dir: Path) -> dict:
             adapter.reset_stream()
         prev = s
         inputs = adapter.prepare(s, K)
+        set_seed(sample_seed(seed, i))
         pred = adapter.predict(inputs, K)
         row = {"idx": i, "episode": s.episode, "t0": round(s.t0, 3), "speed_mps": round(s.speed, 3),
                "warmup": i < warmup, "has_plan": pred.xy is not None}
@@ -115,7 +107,7 @@ def run(cfg: dict, config_dir: Path) -> dict:
             reasoning.append({"idx": i, "t0": round(s.t0, 3), "lat_decode_ms": row.get("lat_decode"),
                               "speed_mps": round(s.speed, 3), "text": pred.text})
         rows.append(row)
-        log.info("[%d/%d] total %.0f ms%s", i + 1, len(samples), pred.stage_ms["total"],
+        log.info("[seed %s | %d/%d] total %.0f ms%s", seed, i + 1, len(samples), pred.stage_ms["total"],
                  f" | ADE {row['ade']:.2f} minADE {row['min_ade']:.2f} m" if pred.xy is not None else " | (no plan)")
 
     keys = []
@@ -125,34 +117,83 @@ def run(cfg: dict, config_dir: Path) -> dict:
                 keys.append(k)
     rows = [{k: r.get(k, math.nan) for k in keys} for r in rows]
 
-    tag = f"_{cfg['run_tag']}" if cfg.get("run_tag") else ""
-    run_name = f"{mcfg['name']}{tag}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
     meta = {"run_name": run_name, "model_name": mcfg["name"], "checkpoint": mcfg.get("checkpoint"),
-            "gpu": gpu_name(), "num_samples": K, "task_prompt": task, "period_s": period,
+            "gpu": gpu_name(), "num_samples": K, "task_prompt": task, "period_s": period, "seed": seed,
             "recording": str(dcfg["recording"]), "warmup": warmup, "horizons_s": horizons}
-    out_dir = _resolve(cfg.get("output_dir", "results"), config_dir) / run_name
     summary = write_report(out_dir, rows, meta, horizons)
     if saved["idx"]:
         # ego frame at t0 (x forward, y left), metres: pred_xy (N,K,64,2), gt_xy (N,64,2), hist_xy (N,16,2)
         np.savez_compressed(out_dir / "predictions.npz", **{k: np.array(v) for k, v in saved.items()})
         (out_dir / "reasoning.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in reasoning))
-    (out_dir / "config.snapshot.yaml").write_text(
-        yaml.safe_dump(copy.deepcopy(cfg), sort_keys=False, allow_unicode=True))
+    snap = copy.deepcopy(cfg)
+    snap["seed"] = seed
+    snap.pop("seeds", None)
+    (out_dir / "config.snapshot.yaml").write_text(yaml.safe_dump(snap, sort_keys=False, allow_unicode=True))
     log.info("Results: %s", out_dir)
     print((out_dir / "summary.md").read_text())
     return summary
+
+
+def run(cfg: dict, config_dir: Path) -> dict:
+    """Load the model once, then run one pass per seed. Returns the summary (1 seed) or the aggregate (several)."""
+    mcfg = cfg["model_cfg"]
+    seeds = [int(s) for s in cfg["seeds"]] if cfg.get("seeds") else [int(cfg.get("seed", 42))]
+
+    adapter = create_adapter(mcfg, cfg.get("task_prompt"))
+    adapter.load()
+
+    dcfg = cfg["data"]
+    period = adapter.required_period_s or float(dcfg.get("period_s", 0.5))
+    if adapter.required_period_s and dcfg.get("period_s") not in (None, adapter.required_period_s):
+        log.warning("%s needs consecutive windows; overriding data.period_s=%s with %s",
+                    mcfg["name"], dcfg.get("period_s"), period)
+    samples = build_samples(_resolve(dcfg["recording"], config_dir), num_frames=int(dcfg.get("num_frames", 4)),
+                            period_s=period, max_samples=dcfg.get("max_samples"),
+                            min_speed=float(dcfg.get("min_speed", 0.0)))
+    if not samples:
+        raise SystemExit("No samples could be built from the recording (check frames/ and trajectory.jsonl).")
+    log.info("%d samples, period %.2f s, model %s, seeds %s", len(samples), period, mcfg["name"], seeds)
+
+    tag = f"_{cfg['run_tag']}" if cfg.get("run_tag") else ""
+    stamp = f"{datetime.datetime.now():%Y%m%d_%H%M%S}"
+    results_dir = _resolve(cfg.get("output_dir", "results"), config_dir)
+
+    if len(seeds) == 1:
+        name = f"{mcfg['name']}{tag}_{stamp}"
+        return run_seed(adapter, samples, cfg, seeds[0], period, name, results_dir / name)
+
+    root_name = f"{mcfg['name']}{tag}_{len(seeds)}seeds_{stamp}"
+    root = results_dir / root_name
+    summaries = {}
+    for seed in seeds:
+        summaries[seed] = run_seed(adapter, samples, cfg, seed, period, f"{root_name}/seed_{seed}",
+                                   root / f"seed_{seed}")
+    meta = {"run_name": root_name, "model_name": mcfg["name"], "num_samples": int(cfg.get("num_samples", 6)),
+            "task_prompt": cfg.get("task_prompt")}
+    result = aggregate(summaries, root, meta)
+    log.info("Aggregate: %s", root / "aggregate.md")
+    print((root / "aggregate.md").read_text())
+    return result
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(HERE / "config.yaml"))
     ap.add_argument("--model", help="model YAML (overrides `model:` in the config)")
+    ap.add_argument("--seed", type=int, help="seed of a single run (overrides `seed:` in the config)")
+    ap.add_argument("--seeds", type=int, nargs="+", help="run once per seed and write aggregate.md over all seeds")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", dest="overrides",
                     help="override a config key, e.g. num_samples=1, data.max_samples=20, model_cfg.cuda_graph=false")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config_path = Path(args.config).resolve()
-    run(load_config(config_path, args.model, args.overrides), config_path.parent)
+    cfg = load_config(config_path, args.model, args.overrides)
+    if args.seed is not None:
+        cfg["seed"] = args.seed
+        cfg.pop("seeds", None)
+    if args.seeds:
+        cfg["seeds"] = args.seeds
+    run(cfg, config_path.parent)
 
 
 if __name__ == "__main__":
