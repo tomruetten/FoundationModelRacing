@@ -28,8 +28,11 @@ first runs). `seed` in `config.yaml` (default 42) seeds every sample from (seed,
 samples is always chronological.
 ```bash
 python run_benchmark.py --seed 7              # single run, fixed seed
-python run_benchmark.py --seeds 1 2 3         # model is loaded once, one pass per seed
+python run_benchmark.py --seeds 1 2 3         # one pass per seed (model loaded once; FlashDrive: one process per seed)
 ```
+FlashDrive cannot start a second stream in the same process (shape caches and compiled graphs are bound to the first
+one), so `--seeds` starts one child process per seed for it (and for any model with `separate_processes: true`); the
+model is loaded and compiled once per seed. The same limit applies to recordings with several episodes.
 With `--seeds` the results go to `results/<model>_<tag>_3seeds_<time>/seed_<s>/` (full report per seed) plus
 `aggregate.md/json`: per-seed means, mean and std over seeds for every metric. Use the std over seeds as the noise
 level when comparing models or prompts. Bit-exact reproducibility is not guaranteed on GPU (CUDA graphs,

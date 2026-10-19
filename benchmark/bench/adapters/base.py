@@ -31,6 +31,9 @@ class ModelAdapter(ABC):
     def predict(self, inputs, num_samples: int) -> Prediction:
         """One timed forward: model inputs -> K trajectories + stage times."""
 
+    # False if one process can only run a single stream (e.g. FlashDrive): several seeds then run in separate processes.
+    supports_stream_restart = True
+
     def reset_stream(self) -> None:
         """Called at every episode start (stateful models, e.g. streaming KV caches)."""
 

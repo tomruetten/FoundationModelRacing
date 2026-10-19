@@ -54,6 +54,7 @@ class FlashDriveAdapter(ModelAdapter):
             self.vs_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_start|>")
             self.ve_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_end|>")
 
+        self._stream_started_once = False
         self.timer = StageTimer()
         if self.optimized:
             for name, stage in (("_encode", "vision"), ("_dflash_prefill", "prefill"),
@@ -65,15 +66,21 @@ class FlashDriveAdapter(ModelAdapter):
             self.timer.wrap_method(self.model.diffusion, "sample", "diffusion")
         self._streaming_started = False
 
+    @property
+    def supports_stream_restart(self) -> bool:
+        # Mirrors flashdrive._is_optimized: only z-lab checkpoints run the streaming/compiled stack.
+        return self.cfg["checkpoint"].split("/", 1)[0].lower() != "z-lab"
+
     def reset_stream(self) -> None:
         if self.optimized:
+            if self._stream_started_once:
+                # Shape caches of the vision tower and the compiled CUDA graphs are bound to the first stream: a
+                # second stream in the same process fails (size mismatch in the first prefill, or a dynamo error
+                # in the compiled encoder). Run every seed / episode in its own process.
+                raise RuntimeError("FlashDrive cannot start a second stream in one process; "
+                                   "use separate processes (run_benchmark.py does this for --seeds).")
+            self._stream_started_once = True
             self.model._past_key_values = None
-            # The first window of a stream has a different input shape than the following streaming windows.
-            # Vision tower and language model keep shape-specific caches from the previous stream's last window;
-            # FlashDrive clears them only at the end of the first prefill, so clear them before a new stream
-            # (needed for several seeds / episodes in one process).
-            self.model.vlm.model.visual.reset_shape_caches()
-            self.model.vlm.model.language_model.reset_shape_caches()
         self._streaming_started = False
 
     def prepare(self, sample, num_samples: int):

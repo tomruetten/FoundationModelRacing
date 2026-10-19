@@ -18,6 +18,7 @@ import datetime
 import json
 import logging
 import math
+import subprocess
 import sys
 from pathlib import Path
 
@@ -159,8 +160,9 @@ def run(cfg: dict, config_dir: Path) -> dict:
     results_dir = _resolve(cfg.get("output_dir", "results"), config_dir)
 
     if len(seeds) == 1:
-        name = f"{mcfg['name']}{tag}_{stamp}"
-        return run_seed(adapter, samples, cfg, seeds[0], period, name, results_dir / name)
+        name = cfg.get("_run_name") or f"{mcfg['name']}{tag}_{stamp}"
+        out_dir = Path(cfg["_out_dir"]) if cfg.get("_out_dir") else results_dir / name
+        return run_seed(adapter, samples, cfg, seeds[0], period, name, out_dir)
 
     root_name = f"{mcfg['name']}{tag}_{len(seeds)}seeds_{stamp}"
     root = results_dir / root_name
@@ -176,12 +178,41 @@ def run(cfg: dict, config_dir: Path) -> dict:
     return result
 
 
+def run_seeds_in_processes(args, cfg: dict, config_dir: Path) -> dict:
+    """One child process (= one model load) per seed; then aggregate. For models that cannot restart a stream."""
+    mcfg = cfg["model_cfg"]
+    seeds = [int(s) for s in cfg["seeds"]]
+    tag = f"_{cfg['run_tag']}" if cfg.get("run_tag") else ""
+    root_name = f"{mcfg['name']}{tag}_{len(seeds)}seeds_{datetime.datetime.now():%Y%m%d_%H%M%S}"
+    root = _resolve(cfg.get("output_dir", "results"), config_dir) / root_name
+    base = [sys.executable, str(Path(__file__).resolve()), "--config", str(Path(args.config).resolve())]
+    if args.model:
+        base += ["--model", args.model]
+    for o in args.overrides:
+        base += ["--set", o]
+    for seed in seeds:
+        cmd = base + ["--seed", str(seed), "--out-dir", str(root / f"seed_{seed}"),
+                      "--run-name", f"{root_name}/seed_{seed}"]
+        log.info("Seed %s in its own process: %s", seed, " ".join(cmd))
+        subprocess.run(cmd, check=True)
+    summaries = {s: json.loads((root / f"seed_{s}" / "summary.json").read_text()) for s in seeds}
+    first = summaries[seeds[0]]["meta"]
+    meta = {"run_name": root_name, "model_name": first["model_name"], "num_samples": first["num_samples"],
+            "task_prompt": first["task_prompt"]}
+    result = aggregate(summaries, root, meta)
+    log.info("Aggregate: %s", root / "aggregate.md")
+    print((root / "aggregate.md").read_text())
+    return result
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(HERE / "config.yaml"))
     ap.add_argument("--model", help="model YAML (overrides `model:` in the config)")
     ap.add_argument("--seed", type=int, help="seed of a single run (overrides `seed:` in the config)")
     ap.add_argument("--seeds", type=int, nargs="+", help="run once per seed and write aggregate.md over all seeds")
+    ap.add_argument("--out-dir", help=argparse.SUPPRESS)   # used by child processes of --seeds
+    ap.add_argument("--run-name", help=argparse.SUPPRESS)
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", dest="overrides",
                     help="override a config key, e.g. num_samples=1, data.max_samples=20, model_cfg.cuda_graph=false")
     args = ap.parse_args()
@@ -193,6 +224,14 @@ def main() -> None:
         cfg.pop("seeds", None)
     if args.seeds:
         cfg["seeds"] = args.seeds
+    if args.out_dir:
+        cfg["_out_dir"], cfg["_run_name"] = args.out_dir, args.run_name
+    if len(cfg.get("seeds") or []) > 1:
+        # Models that cannot restart a stream in one process (FlashDrive), or `model_cfg.separate_processes: true`
+        probe = create_adapter(cfg["model_cfg"], cfg.get("task_prompt"))
+        if cfg["model_cfg"].get("separate_processes") or not probe.supports_stream_restart:
+            run_seeds_in_processes(args, cfg, config_path.parent)
+            return
     run(cfg, config_path.parent)
 
 

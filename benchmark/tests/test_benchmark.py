@@ -162,3 +162,26 @@ def test_multi_seed_run_and_aggregate(tmp_path):
     assert set(ade["per_seed"]) == {"1", "2", "3"}
     # the constant-velocity baseline is deterministic: identical across seeds, std 0
     assert ade["std_over_seeds"] == 0.0
+
+
+def test_seeds_in_separate_processes(tmp_path):
+    import subprocess
+
+    import yaml
+
+    make_recording(tmp_path / "rec")
+    (tmp_path / "m.yaml").write_text(yaml.safe_dump({"name": "cv", "adapter": "constant_velocity",
+                                                      "separate_processes": True}))
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump({"model": "m.yaml", "data": {"recording": "rec", "period_s": 0.5,
+                                         "max_samples": 8}, "task_prompt": None, "num_samples": 2,
+                                        "warmup": 1, "output_dir": "out", "run_tag": "proc"}))
+    script = Path(__file__).resolve().parents[1] / "run_benchmark.py"
+    subprocess.run([sys.executable, str(script), "--config", str(cfg_path), "--seeds", "4", "5"],
+                   check=True, capture_output=True)
+    root = next(p for p in (tmp_path / "out").iterdir() if "2seeds" in p.name)
+    for s in (4, 5):
+        assert (root / f"seed_{s}" / "summary.md").exists()
+        assert yaml.safe_load((root / f"seed_{s}" / "config.snapshot.yaml").read_text())["seed"] == s
+    agg = json.loads((root / "aggregate.json").read_text())
+    assert set(agg["metrics"]["ade (m)"]["per_seed"]) == {"4", "5"}
