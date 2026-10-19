@@ -12,11 +12,13 @@ Per sample: front camera frames + ego history + task prompt -> K trajectories, t
 import argparse
 import copy
 import datetime
+import json
 import logging
 import math
 import sys
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 HERE = Path(__file__).resolve().parent
@@ -90,6 +92,8 @@ def run(cfg: dict, config_dir: Path) -> dict:
     log.info("%d samples, period %.2f s, model %s", len(samples), period, mcfg["name"])
 
     rows, prev = [], None
+    saved = {"idx": [], "t0": [], "pred_xy": [], "gt_xy": [], "hist_xy": []}
+    reasoning = []
     for i, s in enumerate(samples):
         if prev is None or s.episode != prev.episode or s.t0 - prev.t0 > 1.5 * period + 0.05:
             adapter.reset_stream()
@@ -103,6 +107,13 @@ def run(cfg: dict, config_dir: Path) -> dict:
         if pred.xy is not None:
             row.update(trajectory_metrics(pred.xy, s.fut_xyz[:, :2], horizons))
             row["reasoning_chars"] = len(pred.text)
+            saved["idx"].append(i)
+            saved["t0"].append(s.t0)
+            saved["pred_xy"].append(pred.xy.astype(np.float32))
+            saved["gt_xy"].append(s.fut_xyz[:, :2])
+            saved["hist_xy"].append(s.hist_xyz[:, :2])
+            reasoning.append({"idx": i, "t0": round(s.t0, 3), "lat_decode_ms": row.get("lat_decode"),
+                              "speed_mps": round(s.speed, 3), "text": pred.text})
         rows.append(row)
         log.info("[%d/%d] total %.0f ms%s", i + 1, len(samples), pred.stage_ms["total"],
                  f" | ADE {row['ade']:.2f} minADE {row['min_ade']:.2f} m" if pred.xy is not None else " | (no plan)")
@@ -120,6 +131,10 @@ def run(cfg: dict, config_dir: Path) -> dict:
             "recording": str(dcfg["recording"]), "warmup": warmup, "horizons_s": horizons}
     out_dir = _resolve(cfg.get("output_dir", "results"), config_dir) / run_name
     summary = write_report(out_dir, rows, meta, horizons)
+    if saved["idx"]:
+        # ego frame at t0 (x forward, y left), metres: pred_xy (N,K,64,2), gt_xy (N,64,2), hist_xy (N,16,2)
+        np.savez_compressed(out_dir / "predictions.npz", **{k: np.array(v) for k, v in saved.items()})
+        (out_dir / "reasoning.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in reasoning))
     (out_dir / "config.snapshot.yaml").write_text(
         yaml.safe_dump(copy.deepcopy(cfg), sort_keys=False, allow_unicode=True))
     log.info("Results: %s", out_dir)

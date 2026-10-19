@@ -87,5 +87,8 @@ def test_end_to_end_constant_velocity(tmp_path):
     # chord vs arc: constant velocity leaves the circle, so ADE is positive but small at short horizons
     assert 0 < summary["accuracy_m"]["ade@2s"]["mean"] < summary["accuracy_m"]["ade"]["mean"]
     out = next((tmp_path / "out").iterdir())
-    for name in ("per_sample.csv", "summary.json", "summary.md", "config.snapshot.yaml"):
+    for name in ("per_sample.csv", "summary.json", "summary.md", "config.snapshot.yaml", "predictions.npz"):
         assert (out / name).exists()
+    d = np.load(out / "predictions.npz")
+    assert d["pred_xy"].shape[1:] == (2, 64, 2) and d["gt_xy"].shape[1:] == (64, 2) and d["hist_xy"].shape[1:] == (16, 2)
+    assert len(d["idx"]) == summary["n_scored"] + 1  # warmup sample is saved too
