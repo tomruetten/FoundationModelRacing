@@ -8,7 +8,11 @@ data:
   max_samples: 150       # ~121 samples fit into the current 20 s recording
   min_speed: 0.0         # skip samples where the car is slower than this (m/s)
 
-task_prompt: "Complete one lap of the track as fast as possible."
+# Passed to the model as navigation text (<|route_start|>...). Set to null for no text at all (prompt ablation).
+# Use run_tag to tell prompt variants apart in the results folder name.
+run_tag: track_prompt
+task_prompt: "Drive on the track between the cones on the left and right. Follow the yellow line markings on the ground that show the course of the track and stay between them. Complete one lap as fast as possible."
+# earlier variant (run_tag: lap_prompt): "Complete one lap of the track as fast as possible."
 num_samples: 6           # K trajectory samples per input -> ADE on sample 0, minADE over K
 horizons_s: [2.0, 4.0, 6.4]
 warmup: 3                # first N predictions are timed but excluded from the statistics

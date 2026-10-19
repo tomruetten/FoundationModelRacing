@@ -125,7 +125,8 @@ def run(cfg: dict, config_dir: Path) -> dict:
                 keys.append(k)
     rows = [{k: r.get(k, math.nan) for k in keys} for r in rows]
 
-    run_name = f"{mcfg['name']}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
+    tag = f"_{cfg['run_tag']}" if cfg.get("run_tag") else ""
+    run_name = f"{mcfg['name']}{tag}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
     meta = {"run_name": run_name, "model_name": mcfg["name"], "checkpoint": mcfg.get("checkpoint"),
             "gpu": gpu_name(), "num_samples": K, "task_prompt": task, "period_s": period,
             "recording": str(dcfg["recording"]), "warmup": warmup, "horizons_s": horizons}
