@@ -68,6 +68,12 @@ class FlashDriveAdapter(ModelAdapter):
     def reset_stream(self) -> None:
         if self.optimized:
             self.model._past_key_values = None
+            # The first window of a stream has a different input shape than the following streaming windows.
+            # Vision tower and language model keep shape-specific caches from the previous stream's last window;
+            # FlashDrive clears them only at the end of the first prefill, so clear them before a new stream
+            # (needed for several seeds / episodes in one process).
+            self.model.vlm.model.visual.reset_shape_caches()
+            self.model.vlm.model.language_model.reset_shape_caches()
         self._streaming_started = False
 
     def prepare(self, sample, num_samples: int):
