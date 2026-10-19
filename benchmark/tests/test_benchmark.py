@@ -185,3 +185,33 @@ def test_seeds_in_separate_processes(tmp_path):
         assert yaml.safe_load((root / f"seed_{s}" / "config.snapshot.yaml").read_text())["seed"] == s
     agg = json.loads((root / "aggregate.json").read_text())
     assert set(agg["metrics"]["ade (m)"]["per_seed"]) == {"4", "5"}
+
+
+def test_resume_completes_missing_seed(tmp_path):
+    import shutil
+    import subprocess
+
+    import yaml
+
+    make_recording(tmp_path / "rec")
+    (tmp_path / "m.yaml").write_text(yaml.safe_dump({"name": "cv", "adapter": "constant_velocity",
+                                                      "separate_processes": True}))
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump({"model": "m.yaml", "data": {"recording": "rec", "period_s": 0.5,
+                                         "max_samples": 8}, "task_prompt": None, "num_samples": 2,
+                                        "warmup": 1, "output_dir": "out", "run_tag": "res"}))
+    script = Path(__file__).resolve().parents[1] / "run_benchmark.py"
+    run = lambda *extra: subprocess.run([sys.executable, str(script), "--config", str(cfg_path), "--seeds", "1", "2",
+                                         "3", *extra], check=True, capture_output=True, text=True)
+    run()
+    root = next(p for p in (tmp_path / "out").iterdir() if "3seeds" in p.name)
+    # simulate a failed seed 3 (no result, no aggregate)
+    shutil.rmtree(root / "seed_3")
+    (root / "aggregate.json").unlink()
+    (root / "aggregate.md").unlink()
+    before = (root / "seed_1" / "summary.json").stat().st_mtime_ns
+    out = run("--resume", str(root))
+    assert (root / "seed_3" / "summary.json").exists() and (root / "aggregate.md").exists()
+    assert (root / "seed_1" / "summary.json").stat().st_mtime_ns == before   # finished seeds are not rerun
+    assert set(json.loads((root / "aggregate.json").read_text())["metrics"]["ade (m)"]["per_seed"]) == {"1", "2", "3"}
+    assert "skipping" in out.stderr

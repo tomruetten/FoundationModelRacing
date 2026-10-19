@@ -178,30 +178,51 @@ def run(cfg: dict, config_dir: Path) -> dict:
     return result
 
 
-def run_seeds_in_processes(args, cfg: dict, config_dir: Path) -> dict:
-    """One child process (= one model load) per seed; then aggregate. For models that cannot restart a stream."""
+def run_seeds_in_processes(args, cfg: dict, config_dir: Path) -> dict | None:
+    """One child process (= one model load) per seed; then aggregate. For models that cannot restart a stream.
+
+    A failing seed (e.g. CUDA out of memory while loading on a shared GPU) does not stop the others; seeds that already
+    have a summary.json in the run folder are skipped, so a failed run is completed with `--resume <run folder>`.
+    """
     mcfg = cfg["model_cfg"]
     seeds = [int(s) for s in cfg["seeds"]]
     tag = f"_{cfg['run_tag']}" if cfg.get("run_tag") else ""
-    root_name = f"{mcfg['name']}{tag}_{len(seeds)}seeds_{datetime.datetime.now():%Y%m%d_%H%M%S}"
-    root = _resolve(cfg.get("output_dir", "results"), config_dir) / root_name
+    if args.resume:
+        root = Path(args.resume).resolve()
+        root_name = root.name
+    else:
+        root_name = f"{mcfg['name']}{tag}_{len(seeds)}seeds_{datetime.datetime.now():%Y%m%d_%H%M%S}"
+        root = _resolve(cfg.get("output_dir", "results"), config_dir) / root_name
     base = [sys.executable, str(Path(__file__).resolve()), "--config", str(Path(args.config).resolve())]
     if args.model:
         base += ["--model", args.model]
     for o in args.overrides:
         base += ["--set", o]
+    failed = []
     for seed in seeds:
+        if (root / f"seed_{seed}" / "summary.json").exists():
+            log.info("Seed %s already done in %s, skipping", seed, root)
+            continue
         cmd = base + ["--seed", str(seed), "--out-dir", str(root / f"seed_{seed}"),
                       "--run-name", f"{root_name}/seed_{seed}"]
         log.info("Seed %s in its own process: %s", seed, " ".join(cmd))
-        subprocess.run(cmd, check=True)
-    summaries = {s: json.loads((root / f"seed_{s}" / "summary.json").read_text()) for s in seeds}
-    first = summaries[seeds[0]]["meta"]
+        if subprocess.run(cmd).returncode != 0:
+            log.error("Seed %s failed; continuing with the other seeds", seed)
+            failed.append(seed)
+    summaries = {s: json.loads((root / f"seed_{s}" / "summary.json").read_text()) for s in seeds
+                 if (root / f"seed_{s}" / "summary.json").exists()}
+    if failed:
+        log.error("Failed seeds: %s. Complete the run with: <same command> --resume %s", failed, root)
+    if not summaries:
+        return None
+    first = next(iter(summaries.values()))["meta"]
     meta = {"run_name": root_name, "model_name": first["model_name"], "num_samples": first["num_samples"],
             "task_prompt": first["task_prompt"]}
     result = aggregate(summaries, root, meta)
-    log.info("Aggregate: %s", root / "aggregate.md")
+    log.info("Aggregate over seeds %s: %s", sorted(summaries), root / "aggregate.md")
     print((root / "aggregate.md").read_text())
+    if failed:
+        sys.exit(1)
     return result
 
 
@@ -211,6 +232,9 @@ def main() -> None:
     ap.add_argument("--model", help="model YAML (overrides `model:` in the config)")
     ap.add_argument("--seed", type=int, help="seed of a single run (overrides `seed:` in the config)")
     ap.add_argument("--seeds", type=int, nargs="+", help="run once per seed and write aggregate.md over all seeds")
+    ap.add_argument("--resume", metavar="RUN_DIR",
+                    help="complete an interrupted --seeds run of models that run one process per seed: "
+                         "seeds with an existing summary.json in RUN_DIR are skipped")
     ap.add_argument("--out-dir", help=argparse.SUPPRESS)   # used by child processes of --seeds
     ap.add_argument("--run-name", help=argparse.SUPPRESS)
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", dest="overrides",
@@ -226,12 +250,14 @@ def main() -> None:
         cfg["seeds"] = args.seeds
     if args.out_dir:
         cfg["_out_dir"], cfg["_run_name"] = args.out_dir, args.run_name
-    if len(cfg.get("seeds") or []) > 1:
+    if len(cfg.get("seeds") or []) > 1 or args.resume:
         # Models that cannot restart a stream in one process (FlashDrive), or `model_cfg.separate_processes: true`
         probe = create_adapter(cfg["model_cfg"], cfg.get("task_prompt"))
         if cfg["model_cfg"].get("separate_processes") or not probe.supports_stream_restart:
             run_seeds_in_processes(args, cfg, config_path.parent)
             return
+        if args.resume:
+            raise SystemExit("--resume applies only to models that run one process per seed (e.g. FlashDrive).")
     run(cfg, config_path.parent)
 
 

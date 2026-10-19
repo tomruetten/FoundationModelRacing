@@ -32,7 +32,9 @@ python run_benchmark.py --seeds 1 2 3         # one pass per seed (model loaded 
 ```
 FlashDrive cannot start a second stream in the same process (shape caches and compiled graphs are bound to the first
 one), so `--seeds` starts one child process per seed for it (and for any model with `separate_processes: true`); the
-model is loaded and compiled once per seed. The same limit applies to recordings with several episodes.
+model is loaded and compiled once per seed. A failed seed (e.g. CUDA out of memory while loading on a shared GPU)
+does not stop the others; complete the run with the same command plus `--resume results/<run folder>` (finished seeds
+are skipped, the aggregate covers all seeds). The same limit applies to recordings with several episodes.
 With `--seeds` the results go to `results/<model>_<tag>_3seeds_<time>/seed_<s>/` (full report per seed) plus
 `aggregate.md/json`: per-seed means, mean and std over seeds for every metric. Use the std over seeds as the noise
 level when comparing models or prompts. Bit-exact reproducibility is not guaranteed on GPU (CUDA graphs,
