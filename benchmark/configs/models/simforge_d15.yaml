@@ -1,0 +1,11 @@
+name: simforge_d15
+adapter: alpamayo                     # same Alpamayo1_5 class and rollout as nvidia/Alpamayo-1.5-10B (config.json: architecture Alpamayo1_5)
+checkpoint: SIMFORGE-AI/SIMFORGE-D1.5   # gated (auto): accept the terms on the HF page, then `hf auth login`
+device: cuda
+attn_implementation: sdpa             # use the same value as in alpamayo15.yaml, otherwise latencies are not comparable
+cuda_graph: true                      # as in alpamayo15.yaml
+num_samples: 6                        # CUDA-graph batch size; keep equal to the top-level num_samples
+max_new_tokens: 256
+temperature: 0.6
+top_p: 0.98
+task_as_nav_text: true                # only used if task_prompt is not null
