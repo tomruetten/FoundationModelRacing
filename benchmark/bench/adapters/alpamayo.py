@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from .base import ModelAdapter, Prediction
+from ..hf_utils import resolve_repo_relative_vlm
 from ..timing import StageTimer
 
 CAMERA_INDEX_FRONT = 1  # helper.CAMERA_DISPLAY_NAMES[1] == "Front camera"
@@ -29,11 +30,13 @@ class AlpamayoAdapter(ModelAdapter):
         # The checkpoint defaults to flash_attention_2, which needs the flash_attn package (not installed
         # in the FlashDrive env). Like flashdrive.from_pretrained, override the config explicitly.
         attn = self.cfg.get("attn_implementation", "sdpa")
-        config = Alpamayo1_5.config_class.from_pretrained(self.cfg["checkpoint"])
+        checkpoint = self.cfg["checkpoint"]
+        config = Alpamayo1_5.config_class.from_pretrained(checkpoint)
         config.attn_implementation = config._attn_implementation = attn
+        checkpoint = resolve_repo_relative_vlm(config, checkpoint)  # e.g. SIMFORGE: vlm_name_or_path = "vlm"
         if attn == "sdpa":
             Alpamayo1_5._supports_sdpa = True  # wrapper class does not declare it, submodels support it
-        self.model = Alpamayo1_5.from_pretrained(self.cfg["checkpoint"], config=config, dtype=torch.bfloat16)
+        self.model = Alpamayo1_5.from_pretrained(checkpoint, config=config, dtype=torch.bfloat16)
         self.model = self.model.to(self.device).eval()
         self.processor = helper.get_processor(self.model.tokenizer)
         if self.cfg.get("cuda_graph", False):
