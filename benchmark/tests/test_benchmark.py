@@ -95,30 +95,29 @@ def test_end_to_end_constant_velocity(tmp_path):
 
 
 def test_resolve_repo_relative_vlm(tmp_path):
-    from types import SimpleNamespace
-
     from bench.hf_utils import resolve_repo_relative_vlm as resolve
 
     # Hub id of the VLM or absolute path: unchanged, nothing downloaded
-    cfg = SimpleNamespace(vlm_name_or_path="Qwen/Qwen3-VL-8B-Instruct")
+    cfg = {"vlm_name_or_path": "Qwen/Qwen3-VL-8B-Instruct"}
     boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be called"))
     assert resolve(cfg, "nvidia/Alpamayo-1.5-10B", file_exists=lambda r, f: False, snapshot_download=boom) == \
-        "nvidia/Alpamayo-1.5-10B" and cfg.vlm_name_or_path == "Qwen/Qwen3-VL-8B-Instruct"
-    cfg = SimpleNamespace(vlm_name_or_path=str(tmp_path / "abs"))
+        "nvidia/Alpamayo-1.5-10B" and cfg["vlm_name_or_path"] == "Qwen/Qwen3-VL-8B-Instruct"
+    cfg = {"vlm_name_or_path": str(tmp_path / "abs")}
     assert resolve(cfg, "x/y", file_exists=boom, snapshot_download=boom) == "x/y"
+    assert resolve({}, "x/y", file_exists=boom, snapshot_download=boom) == "x/y"
 
     # relative "vlm" with a Hub id: snapshot is downloaded, path points into it
     snap = tmp_path / "snap"
     (snap / "vlm").mkdir(parents=True)
-    cfg = SimpleNamespace(vlm_name_or_path="vlm")
+    cfg = {"vlm_name_or_path": "vlm"}
     seen = {}
     out = resolve(cfg, "SIMFORGE-AI/SIMFORGE-D1.5",
                   file_exists=lambda repo, f: seen.setdefault("f", (repo, f)) and True,
                   snapshot_download=lambda repo, **kw: str(snap))
-    assert out == str(snap) and cfg.vlm_name_or_path == str(snap / "vlm")
+    assert out == str(snap) and cfg["vlm_name_or_path"] == str(snap / "vlm")
     assert seen["f"] == ("SIMFORGE-AI/SIMFORGE-D1.5", "vlm/config.json")
 
     # relative "vlm" with a local checkpoint directory (e.g. hf download --local-dir)
-    cfg = SimpleNamespace(vlm_name_or_path="vlm")
+    cfg = {"vlm_name_or_path": "vlm"}
     assert resolve(cfg, str(snap), file_exists=boom, snapshot_download=boom) == str(snap)
-    assert cfg.vlm_name_or_path == str(snap / "vlm")
+    assert cfg["vlm_name_or_path"] == str(snap / "vlm")

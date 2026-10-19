@@ -31,9 +31,12 @@ class AlpamayoAdapter(ModelAdapter):
         # in the FlashDrive env). Like flashdrive.from_pretrained, override the config explicitly.
         attn = self.cfg.get("attn_implementation", "sdpa")
         checkpoint = self.cfg["checkpoint"]
-        config = Alpamayo1_5.config_class.from_pretrained(checkpoint)
+        # Fix a repository-relative vlm_name_or_path (e.g. SIMFORGE: "vlm") in the raw config dict first: building
+        # the config object already loads a processor from that path.
+        config_dict, _ = Alpamayo1_5.config_class.get_config_dict(checkpoint)
+        checkpoint = resolve_repo_relative_vlm(config_dict, checkpoint)
+        config = Alpamayo1_5.config_class.from_dict(config_dict)
         config.attn_implementation = config._attn_implementation = attn
-        checkpoint = resolve_repo_relative_vlm(config, checkpoint)  # e.g. SIMFORGE: vlm_name_or_path = "vlm"
         if attn == "sdpa":
             Alpamayo1_5._supports_sdpa = True  # wrapper class does not declare it, submodels support it
         self.model = Alpamayo1_5.from_pretrained(checkpoint, config=config, dtype=torch.bfloat16)
