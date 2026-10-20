@@ -66,6 +66,7 @@ def equirect_from_faces(faces, width):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--config', type=Path, default=ROOT / 'data/local/New1/checkpoints/camera_3dgs/config.yml')
+    parser.add_argument('--data-dir', type=Path, help='dataset dir with the transforms.json of this checkpoint')
     parser.add_argument('--out', type=Path, default=ROOT / 'reference/iros2026/hall_pano.png')
     parser.add_argument('--height', type=float, default=1.0, help='panorama height above the floor (m)')
     parser.add_argument('--path-height', type=float, default=.25,
@@ -80,7 +81,7 @@ def main():
     from object_splats import trajectory_up, FloorPlane
     from PIL import Image
 
-    renderer = SplatCameraRenderer(args.config)
+    renderer = SplatCameraRenderer(args.config, data_dir=args.data_dir)
     frames = json.loads((renderer.data_dir / 'transforms.json').read_text())['frames']
     poses = np.array([f['transform_matrix'] for f in frames], float)
     centre = poses[:, :3, 3].mean(0)
