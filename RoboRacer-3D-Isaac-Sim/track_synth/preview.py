@@ -60,6 +60,25 @@ def render(tris, scenario, pose_xy_yaw, size=None):
     return img
 
 
+def plot_raceline(scenario, out):
+    """Top view: map boundaries, centre line, racing line coloured by reference speed."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(14, 8.5))
+    for key in ('outer_boundary',):
+        poly = np.array(scenario[key]); ax.plot(*np.vstack([poly, poly[:1]]).T, color='gray', lw=1)
+    for poly in scenario['inner_boundaries']:
+        poly = np.array(poly); ax.plot(*np.vstack([poly, poly[:1]]).T, color='gray', lw=1)
+    center = np.array(scenario['reference_path']); ax.plot(*np.vstack([center, center[:1]]).T, 'k--', lw=.5)
+    line, speed = np.array(scenario['raceline']), np.array(scenario['raceline_speed'])
+    sc = ax.scatter(line[:, 0], line[:, 1], c=speed, s=6, cmap='viridis'); fig.colorbar(sc, label='reference speed (m/s)')
+    info = scenario['raceline_info']
+    ax.set_title(f"racing line: lap {info['lap_time_s']:.1f} s (centre line {info['centerline_lap_time_s']:.1f} s), "
+                 f"v_max {info['limits']['v_max']} m/s, a_lat {info['limits']['a_lat']} m/s^2")
+    ax.set_aspect('equal'); fig.savefig(out, dpi=70)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('scene_dir'); parser.add_argument('--fractions', type=float, nargs='*', default=[0, .25, .5, .75])
@@ -70,6 +89,8 @@ def main():
         i = int(frac * len(path)) % len(path); j = (i + 3) % len(path)
         yaw = np.arctan2(*(path[j] - path[i])[::-1])
         render(tris, scenario, (*path[i], yaw)).save(d / f'preview_{int(frac * 100):02d}.png')
+    if 'raceline' in scenario:
+        plot_raceline(scenario, d / 'raceline.png')
     print('wrote previews to', d)
 
 

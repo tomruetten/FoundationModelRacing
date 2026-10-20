@@ -11,7 +11,9 @@ import shutil
 import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
+from . import vehicle
 from .extract import extract
+from .vehicle import camera_intrinsics, camera_mount
 from .meshes import (stacked_hose_layers, corrugation_normal_map, hose_albedo, concrete_albedo)
 
 HOSE_RADIUS = .15      # 30 cm diameter
@@ -20,15 +22,10 @@ HOSE_FLATTEN = .68     # padded hoses are wider than tall: vertical / horizontal
 UPPER_LAYER_FRACTION = 1.   # share of the wall length with a second, stacked hose (1 = two layers everywhere)
 HALL_MARGIN = (7., 7.)  # hall extends this far past the map bounds (x, y)
 HALL_HEIGHT = 9.
-# Camera intrinsics and mount rotation from configs/racing_142014.json (OAK-D Pro W on Car02).
-CAMERA = dict(width=640, height=400, fx=283.4349068198737, fy=291.87822087105116,
-              cx=320.97935, cy=194.30535)
-# Height: reference/vehicle/vehicle_parameters.txt §6b corrects the camera to z=0.200 m above
-# base_link (the 0.066 m in the racing config is the uncorrected value); base_link sits at axle
-# height (~0.05 m tyre radius), so the optical centre is ~0.25 m above the floor.
-CAMERA_MOUNT = dict(translation=[0.29267, 0.06987, 0.200],
-                    quaternion=[-0.4743109522221859, 0.4989799497372533, -0.5079499488336963, 0.5177209478494539])
-BASE_Z = .05
+# Car02 camera and geometry: see vehicle.py (every value from the repo's reference/ data)
+CAMERA = camera_intrinsics(.5)
+CAMERA_MOUNT = camera_mount()
+BASE_Z = vehicle.BASE_Z
 REFERENCE = Path(__file__).resolve().parents[1] / 'reference/iros2026'
 FLOOR_TILE_M = 4.096   # real_textures.py: 2048 px at 2 mm
 
@@ -253,7 +250,8 @@ def build_hall(stage, geometry, materials, rng, light_scale=1.):
 
 
 def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_LAYERS,
-          floor_texture=None, hdri=None, dome_rotate=(0., 0.), upper_fraction=UPPER_LAYER_FRACTION):
+          floor_texture=None, hdri=None, dome_rotate=(0., 0.), upper_fraction=UPPER_LAYER_FRACTION,
+          raceline=True, line_limits=None, line_mus=None):
     from pxr import Usd, UsdGeom
     out = Path(out_dir); (out / 'textures').mkdir(parents=True, exist_ok=True)
     geometry = extract(map_yaml)
@@ -300,6 +298,24 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
             _mesh(stage, f'/World/Track/Strap{i}_{k}', mesh, strap)
     stage.GetRootLayer().Save()
 
+    line = {}
+    if raceline:
+        from .raceline import optimise_line
+        kwargs = dict(line_limits or {})
+        if line_mus:
+            kwargs['mus'] = line_mus
+        margin = HOSE_RADIUS + vehicle.WIDTH / 2 + .12          # hose radius + half car width + safety
+        best = optimise_line(geometry.centerline, geometry.half_width, margin=margin, **kwargs)
+        wall_tree = cKDTree(np.vstack(geometry.walls))
+        clearance = wall_tree.query(best['path'])[0] - HOSE_RADIUS
+        line = dict(raceline=best['path'].tolist(), raceline_speed=best['speed'].tolist(),
+                    raceline_clearance=clearance.tolist(),
+                    raceline_info=dict(lap_time_s=best['lap_time'], centerline_lap_time_s=best['centerline_lap_time'],
+                                       mu=best['mu'], kappa_max=best['kappa_max'], feasible=best['feasible'],
+                                       limits=best['limits'], margin_m=margin,
+                                       method='bounded least squares min-curvature/shortest blend, lap time from a '
+                                              'friction-limited speed profile'))
+
     thin = lambda p, step: np.asarray(p)[::step].tolist()
     scenario = dict(
         name=f'synthetic {Path(map_yaml).stem}', usd='track.usd', map=str(map_yaml),
@@ -309,6 +325,7 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
         half_width=thin(geometry.half_width, 2),
         outer_boundary=thin(geometry.outer, 2), inner_boundaries=[thin(h, 2) for h in geometry.holes],
         hose=dict(radius_m=HOSE_RADIUS, layers=hose_layers, flatten=HOSE_FLATTEN, upper_fraction=upper_fraction),
+        **line,
         provenance=dict(hall=f'3DGS panorama {Path(hdri).name}' if hdri else 'placeholder geometry, not a scan',
                         floor=f'texture {Path(floor_texture).name}' if floor_texture else 'procedural',
                         walls_from='skeleton of map wall lines', seed=seed))
@@ -323,6 +340,10 @@ def main():
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--light-scale', type=float, default=1., help='multiplies all light intensities (raise if frames are dark)')
     parser.add_argument('--hose-layers', type=int, default=HOSE_LAYERS, choices=(1, 2))
+    parser.add_argument('--no-raceline', action='store_true', help='skip the racing line (collect --driver centerline only)')
+    parser.add_argument('--v-max', type=float, default=vehicle.SPEED_MAX, help='racing line top speed (m/s); GRU training range')
+    parser.add_argument('--a-lat', type=float, default=vehicle.A_LAT, help='lateral acceleration limit (m/s^2), Car02 min-time reference')
+    parser.add_argument('--a-acc', type=float, default=vehicle.A_ACC); parser.add_argument('--a-dec', type=float, default=vehicle.A_DEC)
     parser.add_argument('--upper-fraction', type=float, default=UPPER_LAYER_FRACTION,
                         help='share of the wall length with a second stacked hose (1 = everywhere)')
     parser.add_argument('--floor-texture', default=str(REFERENCE / 'floor_real.jpg'),
@@ -333,9 +354,15 @@ def main():
     args = parser.parse_args()
     geometry, usd = build(args.map, args.out, args.seed, light_scale=args.light_scale, hose_layers=args.hose_layers,
                           floor_texture=args.floor_texture, hdri=args.hdri,
-                          dome_rotate=(args.dome_rotate_x, args.dome_rotate_z), upper_fraction=args.upper_fraction)
+                          dome_rotate=(args.dome_rotate_x, args.dome_rotate_z), upper_fraction=args.upper_fraction,
+                          raceline=not args.no_raceline,
+                          line_limits=dict(v_max=args.v_max, a_lat=args.a_lat, a_acc=args.a_acc, a_dec=args.a_dec))
     length = np.linalg.norm(np.diff(np.vstack([geometry.centerline, geometry.centerline[:1]]), axis=0), axis=1).sum()
     print(f'wrote {usd} | centerline {length:.1f} m | {len(geometry.walls)} hose segments')
+    info = json.loads((Path(args.out) / 'scenario.json').read_text()).get('raceline_info')
+    if info:
+        print(f"racing line: lap {info['lap_time_s']:.1f} s vs centre line {info['centerline_lap_time_s']:.1f} s "
+              f"(v_max {info['limits']['v_max']} m/s, a_lat {info['limits']['a_lat']} m/s^2), max curvature {info['kappa_max']:.2f} 1/m")
 
 
 if __name__ == '__main__':

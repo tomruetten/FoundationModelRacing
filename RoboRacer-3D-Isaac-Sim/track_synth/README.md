@@ -21,6 +21,19 @@ PYTHONPATH=. python -m track_synth.collect --scene outputs/iros2026 \
     --episodes 20 --seconds 25 --output outputs/iros2026_data
 ```
 
+Vehicle values: all constants live in [vehicle.py](vehicle.py), each taken from the repo's reference data
+(wheelbase 0.3225 m, 0.26 x 0.42 m, steering +-0.29 rad, camera intrinsics/orientation from `reference/calibration`,
+speed range 0.3-2.5 m/s of the GRU training data, a_long +2.2/-2.5 and a_lat 2.8 m/s^2 of the Car02 min-time
+reference raceline, the validated adaptive-lookahead Pure Pursuit of `closed_loop/10_v2_main_demo.py`);
+`tests/test_track_synth.py` re-checks them against those files.
+
+Driving line: `build` also computes a lap-time-oriented racing line (bounded least squares, minimum curvature
+blended with shortest path, curvature kept below the steering limit) and a friction-limited speed profile
+(`--v-max 2.5 --a-lat 2.8 --a-acc 2.2 --a-dec 2.5`); `preview` plots it (`raceline.png`). `collect --driver raceline`
+(default) follows it with that Pure Pursuit at 0.75-1.0x the profile speed (`--speed-scale-min/max`),
+starts rolling at that speed with small lateral / heading offsets (`--max-lateral 0.15`, `--yaw-noise 0.05`) and
+drives `--lead-in 2` s before the first frame. `--driver centerline` = constant speed on the centre line.
+
 Pipeline: wall lines of the map are skeletonised -> hose centre lines; free band -> medial-axis
 centre line (closed, 0.1 m) and collision polygons. Each episode starts at a random point on the
 centre line with lateral/heading offset and a random speed; `RaceEngine` autopilot follows the
@@ -30,6 +43,10 @@ centre line with the GRU (or `--kinematic`) dynamics. Camera = the OAK-D intrins
 ## Assumptions to check
 - Map wall lines are taken as hose **centres**. The free width is ~2.2 m between the drawn lines,
   so about 1.9 m between hose surfaces.
+- Camera height 0.18 m above the floor is a choice between conflicting numbers in the reference data
+  (vehicle_parameters.txt: 0.200 m over base_link = 0.25 m above the floor; extrinsics yaml: 0.0656 m = 0.12 m;
+  measured in the recorded scenes: path Z 0.15-0.21 m, floor-plane fit 0.15 +- 0.07 m). `collect --camera-height`
+  overrides it; the floor texture assumes the same height (`real_textures.py`).
 - Hose (modelled on data/frames): fat padded tubes, 30 cm wide and ~20 cm tall (flatten 0.68), cream-white,
   fine shallow ripples, hardly any irregularity, thin dark-brown straps every ~1.8 m, two stacked layers
   everywhere by default (upper one slightly smaller). The real boundary is mostly
@@ -40,12 +57,15 @@ centre line with the GRU (or `--kinematic`) dynamics. Camera = the OAK-D intrins
   the distant lights only (hoses/floor), `--light-scale` all of them. A second DomeLight must not be
   used: RTX picks a single environment and the background turned black.
 - Floor: real floor of the hall, inverse-perspective-mapped from 3DGS ego frames and quilted from line-free
-  0.32 m windows (`real_textures.py`, 4.1 m tile). Camera: 0.25 m above the floor (vehicle_parameters.txt
-  §6b), pitched ~3 deg up; `--camera-height` overrides.
+  0.32 m windows (`real_textures.py`, 4.1 m tile). Camera: 0.18 m above the floor, calibrated orientation
+  (pitched 5.3 deg up, yaw -1.3, roll -1.3); `--camera-height` overrides.
 - `--hdri` panorama = 360° render of a hall 3DGS at 1 m height, an infinitely distant dome (no parallax). If its
   horizon is tilted, rebuild with `--dome-rotate-x 90`.
 - The full racing pipeline (scene = 3DGS) cannot host this track: the scans cover a ~8 x 6 m track,
   the IROS layout is 52 x 31 m.
+- The racing line is a minimum-curvature / shortest-path blend scored by lap time, not a full minimum-time
+  optimal control solution; speed limits (`a_lat` etc.) are assumptions, not measured Car02 grip. The tightest
+  corner needs ~0.8 1/m (radius 1.2 m) against a steering limit of ~0.9 1/m: little margin for the learned dynamics.
 - The GRU was trained on other surfaces/tracks; poses are exact simulator states, not real-car predictions.
 - Exposure is fixed by default (`--auto-exposure` opts in to the temporal one). Auto exposure adapts over
   time, so the same pose gets different brightness depending on the frames before, and it cancels light changes.

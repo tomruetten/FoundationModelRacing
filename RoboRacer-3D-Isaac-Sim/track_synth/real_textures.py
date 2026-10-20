@@ -1,7 +1,7 @@
 """Floor texture from real (or 3DGS-rendered) ego camera frames.
 
 Inverse perspective mapping of the floor in front of the car (known intrinsics, mount and
-height) gives a metric top view. Small windows free of line paint / debris are collected from
+height) gives a metric top view (constants from vehicle.py). Small windows free of line paint / debris are collected from
 all frames and quilted into a tileable texture (2 mm per pixel).
 
     python -m track_synth.real_textures --frames ../data/frames --out reference/iros2026/floor_real.png
@@ -12,11 +12,12 @@ import numpy as np
 import cv2
 from racing.config import sensor_pose
 
-# 1280x800 intrinsics of the OAK-D frames (2x the 640x400 racing config) and the Car02 mount
-K_1280 = np.array([[566.8698, 0, 641.9587], [0, 583.7564, 388.6107], [0, 0, 1]])
-MOUNT = dict(translation=[0.29267, 0.06987, 0.200],
-             quaternion=[-0.4743109522221859, 0.4989799497372533, -0.5079499488336963, 0.5177209478494539])
-BASE_Z = .05
+from . import vehicle
+
+K_1280 = np.array([[vehicle.INTRINSICS_1280['fx'], 0, vehicle.INTRINSICS_1280['cx']],
+                   [0, vehicle.INTRINSICS_1280['fy'], vehicle.INTRINSICS_1280['cy']], [0, 0, 1]])
+MOUNT = vehicle.camera_mount()
+BASE_Z = vehicle.BASE_Z
 
 
 def ipm_maps(K, size_m=1.4, ahead_m=.95, res=.002, scale=1.):
