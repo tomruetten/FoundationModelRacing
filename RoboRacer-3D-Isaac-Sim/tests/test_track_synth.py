@@ -69,3 +69,17 @@ def test_autopilot_laps_without_contact(tmp_path):
         last[ep] = snap
     assert set(last) == {0, 1}
     assert all(s.status == 'running' and s.time_s == pytest.approx(20, abs=.05) for s in last.values())
+
+
+def test_camera_height_and_pitch_match_car02(tmp_path):
+    pytest.importorskip('pxr')
+    from track_synth.build import build
+    from track_synth.collect import camera_pose, scaled_intrinsics
+    build(MAP, tmp_path, seed=0, sides=8)
+    scene = load_scene(tmp_path)
+    pose = camera_pose(scene, dict(x=1., y=2., yaw=0.))
+    assert pose[2, 3] == pytest.approx(.25, abs=.01)                       # optical centre above the floor
+    assert np.degrees(np.arcsin(pose[2, 2])) == pytest.approx(3., abs=.5)  # optical axis pitched ~3 deg up
+    assert camera_pose(scene, dict(x=0., y=0., yaw=0.), camera_height=.3)[2, 3] == pytest.approx(.3)
+    big = scaled_intrinsics(scene['camera'], 2)
+    assert (big['width'], big['height']) == (1280, 800) and big['fx'] == pytest.approx(2 * scene['camera']['fx'])

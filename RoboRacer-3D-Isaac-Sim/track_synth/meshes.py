@@ -91,7 +91,7 @@ def stacked_hose_layers(path, rng, radius=.15, flatten=.82, layers=2, sides=24):
     return meshes
 
 
-def corrugation_normal_map(size=256, ripples=12, depth=.9):
+def corrugation_normal_map(size=256, ripples=20, depth=.35):
     """Tangent-space normal map; ripples vary along u (hose axis)."""
     u = (np.arange(size) + .5) / size
     slope = depth * np.cos(2 * np.pi * ripples * u)
@@ -101,16 +101,16 @@ def corrugation_normal_map(size=256, ripples=12, depth=.9):
     return ((n * .5 + .5) * 255).astype(np.uint8)
 
 
-def hose_albedo(size=256, ripples=12, base=(0.86, 0.86, 0.83), seed=0):
+def hose_albedo(size=256, ripples=20, base=(0.93, 0.93, 0.90), seed=0):
     rng = np.random.default_rng(seed)
     u = (np.arange(size) + .5) / size
-    shade = .93 + .07 * np.cos(2 * np.pi * ripples * u)
+    shade = .96 + .04 * np.cos(2 * np.pi * ripples * u)
     img = np.ones((size, size, 3)) * np.array(base) * shade[None, :, None]
-    img *= 1 + .04 * rng.standard_normal((size, size, 1))
+    img *= 1 + .02 * rng.standard_normal((size, size, 1))
     return (np.clip(img, 0, 1) * 255).astype(np.uint8)
 
 
-def concrete_albedo(size=1024, base=(0.52, 0.51, 0.48), seed=1):
+def concrete_albedo(size=1024, base=(0.76, 0.74, 0.69), seed=1):
     """Tileable grey epoxy floor: low-frequency mottling + fine grain + a few dark stains."""
     rng = np.random.default_rng(seed)
     def periodic(cells):
@@ -130,5 +130,5 @@ def concrete_albedo(size=1024, base=(0.52, 0.51, 0.48), seed=1):
         cx, cy = rng.integers(0, size, 2); r = rng.integers(6, 28)
         yy, xx = np.ogrid[:size, :size]
         d = ((xx - cx) ** 2 + (yy - cy) ** 2) / r ** 2
-        img *= (1 - .35 * np.exp(-d))[..., None]
+        img *= (1 - .2 * np.exp(-d))[..., None]
     return (np.clip(img, 0, 1) * 255).astype(np.uint8)

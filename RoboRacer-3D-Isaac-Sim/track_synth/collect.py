@@ -30,6 +30,19 @@ def load_scene(scene_dir):
     return scenario
 
 
+def camera_pose(scenario, state, camera_height=None):
+    """World pose of the optical (RDF) camera frame. base_link sits `base_z` above the floor;
+    `camera_height` (optical centre above floor) overrides it."""
+    mount = scenario['sensors']['camera']
+    base_z = scenario.get('base_z', 0.) if camera_height is None else camera_height - mount['translation'][2]
+    values = asdict(state) if not isinstance(state, dict) else dict(state)
+    return sensor_pose({**values, 'z': base_z}, mount)
+
+
+def scaled_intrinsics(camera, scale):
+    return {k: (round(v * scale) if k in ('width', 'height') else v * scale) for k, v in camera.items()}
+
+
 def make_engine(scenario, model, args):
     return RaceEngine({'ego': model}, scenario['reference_path'], {'ego': VehicleState(x=float(scenario['reference_path'][0, 0]),
                       y=float(scenario['reference_path'][0, 1]))},
@@ -99,6 +112,7 @@ def run(args):
     output = Path(args.output); (output / 'frames').mkdir(parents=True, exist_ok=True)
     exit_code = 0
     try:
+        import carb
         import omni.usd
         import omni.replicator.core as rep
         from pxr import UsdGeom, UsdLux, Gf
@@ -107,7 +121,10 @@ def run(args):
         context = omni.usd.get_context(); context.new_stage(); stage = context.get_stage()
         stage.DefinePrim('/World', 'Xform').GetReferences().AddReference(scenario['usd_path'])
         UsdGeom.SetStageUpAxis(stage, 'Z'); UsdGeom.SetStageMetersPerUnit(stage, 1.)
-        intrinsics = scenario['camera']
+        settings = carb.settings.get_settings()
+        # auto exposure: keeps frames usable while the (uncalibrated) light levels are tuned
+        settings.set('/rtx/post/histogram/enabled', not args.no_auto_exposure)
+        intrinsics = scaled_intrinsics(scenario['camera'], args.image_scale)
         camera, camera_op = _camera(stage, '/World/EgoCamera', intrinsics)
         product = rep.create.render_product(str(camera.GetPath()), (intrinsics['width'], intrinsics['height']))
         rgb = rep.AnnotatorRegistry.get_annotator('rgb'); rgb.attach([product])
@@ -122,7 +139,7 @@ def run(args):
                 prim.GetAttribute('inputs:intensity').Set(float(intensity * scale))
                 prim.GetAttribute('inputs:color').Set(Gf.Vec3f(*(np.array(color) * tint)))
         def place_camera(state):
-            pose = sensor_pose(asdict(state), scenario['sensors']['camera'])   # optical RDF in world
+            pose = camera_pose(scenario, state, args.camera_height)   # optical RDF in world
             usd_pose = pose.copy(); usd_pose[:3, :3] = pose[:3, :3] @ np.diag([1., -1., -1.])  # -> USD camera axes
             camera_op.Set(Gf.Matrix4d(usd_pose.T.tolist()))
             return pose
@@ -174,6 +191,9 @@ def build_parser():
     parser.add_argument('--dynamics-checkpoint', help='Run30 GRU checkpoint (learned dynamics)')
     parser.add_argument('--kinematic', action='store_true', help='explicit diagnostic bicycle model instead of the GRU')
     parser.add_argument('--light-scale', type=float, default=1., help='global brightness factor applied at run time (no rebuild needed)')
+    parser.add_argument('--no-auto-exposure', action='store_true')
+    parser.add_argument('--camera-height', type=float, help='optical centre above the floor (m); default from scene (~0.25)')
+    parser.add_argument('--image-scale', type=float, default=1., help='2 renders 1280x800 (same intrinsics, scaled)')
     parser.add_argument('--renderer', default='RealTimePathTracing')
     parser.add_argument('--subframes', type=int, default=3, help='RTX sub-frames per saved image (noise vs. speed)')
     parser.add_argument('--warmup', type=int, default=60)

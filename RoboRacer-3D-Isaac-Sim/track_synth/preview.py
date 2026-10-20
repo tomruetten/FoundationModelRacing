@@ -7,10 +7,9 @@ import json
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
-from racing.config import sensor_pose
 
 
-def load_triangles(usd_path, prims=('/World/Track', '/World/Hall/Floor')):
+def load_triangles(usd_path, prims=('/World/Track',)):
     from pxr import Usd, UsdGeom
     stage = Usd.Stage.Open(str(usd_path)); tris = []
     for prim in stage.Traverse():
@@ -32,21 +31,31 @@ def load_triangles(usd_path, prims=('/World/Track', '/World/Hall/Floor')):
 
 def render(tris, scenario, pose_xy_yaw, size=None):
     cam = scenario['camera']; w, h = size or (cam['width'], cam['height'])
+    from .collect import camera_pose
     x, y, yaw = pose_xy_yaw
-    c2w = sensor_pose(dict(x=x, y=y, yaw=yaw), scenario['sensors']['camera'])
+    c2w = camera_pose(scenario, dict(x=x, y=y, yaw=yaw))
+    # 1 m checker floor tiles around the car (the scene floor is one huge quad, unusable here)
+    gx, gy = np.meshgrid(np.arange(-30, 30), np.arange(-30, 30))
+    corners = np.stack([np.c_[gx.ravel() + a, gy.ravel() + b] for a, b in ((0, 0), (1, 0), (1, 1))], 1)
+    corners2 = np.stack([np.c_[gx.ravel() + a, gy.ravel() + b] for a, b in ((0, 0), (1, 1), (0, 1))], 1)
+    floor = np.concatenate([corners, corners2]) + np.round([x, y])
+    floor = np.concatenate([floor, np.zeros(floor.shape[:2] + (1,))], -1)
+    checker = np.tile(((gx + gy).ravel() % 2).astype(bool), 2)
+    tris = np.concatenate([floor, tris]); is_floor = np.r_[np.ones(len(floor), bool), np.zeros(len(tris) - len(floor), bool)]
+    checker = np.r_[checker, np.zeros(len(tris) - len(floor), bool)]
     w2c = np.linalg.inv(c2w)
     p = tris @ w2c[:3, :3].T + w2c[:3, 3]                 # optical frame: x right, y down, z forward
     depth = p[..., 2]; keep = (depth > .05).all(1) & (depth < 40).all(1)
-    tris, p = tris[keep], p[keep]
+    tris, p, is_floor, checker = tris[keep], p[keep], is_floor[keep], checker[keep]
     uv = np.stack([cam['fx'] * p[..., 0] / p[..., 2] + cam['cx'], cam['fy'] * p[..., 1] / p[..., 2] + cam['cy']], -1)
     normal = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     normal /= np.linalg.norm(normal, axis=1, keepdims=True) + 1e-12
     shade = .25 + .75 * np.abs(normal @ np.array([.3, .2, .93]))
     order = np.argsort(-p[..., 2].mean(1))
-    img = Image.new('RGB', (w, h), (150, 160, 170)); draw = ImageDraw.Draw(img)
+    img = Image.new('RGB', (w, h), (90, 100, 115)); draw = ImageDraw.Draw(img)
     for i in order:
-        flat = tris[i, :, 2].max() < .001
-        col = np.array((125, 125, 118) if flat else (225, 225, 220)) * shade[i]
+        col = (np.array((170, 168, 160) if checker[i] else (150, 148, 140)) if is_floor[i]
+               else np.array((225, 225, 220)) * shade[i])
         draw.polygon([tuple(q) for q in uv[i]], fill=tuple(col.astype(int)))
     return img
 

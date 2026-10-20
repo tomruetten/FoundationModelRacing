@@ -15,13 +15,18 @@ from .meshes import (stacked_hose_layers, corrugation_normal_map, hose_albedo, c
 
 HOSE_RADIUS = .15      # 30 cm diameter
 HOSE_LAYERS = 2
+HOSE_FLATTEN = .72     # soft hoses sag: vertical / horizontal radius
 HALL_MARGIN = (7., 7.)  # hall extends this far past the map bounds (x, y)
 HALL_HEIGHT = 9.
-# Camera and mount copied from configs/racing_142014.json (OAK-D Pro W on Car02).
+# Camera intrinsics and mount rotation from configs/racing_142014.json (OAK-D Pro W on Car02).
 CAMERA = dict(width=640, height=400, fx=283.4349068198737, fy=291.87822087105116,
               cx=320.97935, cy=194.30535)
-CAMERA_MOUNT = dict(translation=[0.29267, 0.06987, 0.06559],
+# Height: reference/vehicle/vehicle_parameters.txt §6b corrects the camera to z=0.200 m above
+# base_link (the 0.066 m in the racing config is the uncorrected value); base_link sits at axle
+# height (~0.05 m tyre radius), so the optical centre is ~0.25 m above the floor.
+CAMERA_MOUNT = dict(translation=[0.29267, 0.06987, 0.200],
                     quaternion=[-0.4743109522221859, 0.4989799497372533, -0.5079499488336963, 0.5177209478494539])
+BASE_Z = .05
 
 
 def _material(stage, path, color, roughness=.6, metallic=0., texture=None, normal=None, uv_scale=None, emissive=None):
@@ -107,6 +112,19 @@ def _box(stage, path, center, size, yaw=0., material=None):
         UsdShade.MaterialBindingAPI(cube).Bind(material)
 
 
+def _rod(stage, path, p0, p1, radius, material=None):
+    from pxr import UsdGeom, UsdShade, Gf
+    p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    axis = p1 - p0; length = float(np.linalg.norm(axis))
+    cyl = UsdGeom.Cylinder.Define(stage, path)
+    cyl.CreateRadiusAttr(radius); cyl.CreateHeightAttr(length); cyl.CreateAxisAttr('Z')
+    matrix = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(0, 0, 1), Gf.Vec3d(*(axis / length))))
+    matrix.SetTranslateOnly(Gf.Vec3d(*((p0 + p1) / 2)))
+    UsdGeom.Xformable(cyl).AddTransformOp().Set(matrix)
+    if material is not None:
+        UsdShade.MaterialBindingAPI(cyl).Bind(material)
+
+
 def _cylinder(stage, path, center, radius, height, material=None):
     from pxr import UsdGeom, UsdShade, Gf
     cyl = UsdGeom.Cylinder.Define(stage, path)
@@ -118,7 +136,7 @@ def _cylinder(stage, path, center, radius, height, material=None):
 
 def build_hall(stage, geometry, materials, rng, light_scale=1.):
     """Placeholder industrial hall: floor, walls, roof, beams, columns and clutter outside the track."""
-    from pxr import UsdGeom, UsdLux, Gf
+    from pxr import UsdGeom, UsdLux, Gf, Sdf
     x0, y0, x1, y1 = geometry.bounds
     hx, hy = HALL_MARGIN
     X0, Y0, X1, Y1 = x0 - hx, y0 - hy, x1 + hx, y1 + hy
@@ -126,9 +144,10 @@ def build_hall(stage, geometry, materials, rng, light_scale=1.):
     UsdGeom.Xform.Define(stage, '/World/Hall')
     _mesh(stage, '/World/Hall/Floor', _quad(X0, Y0, X1, Y1, 0., ((X1 - X0) / 4., (Y1 - Y0) / 4.)), materials['floor'])
     _mesh(stage, '/World/Hall/Roof', _quad(X0, Y0, X1, Y1, H, ((X1 - X0) / 3., (Y1 - Y0) / 3.)), materials['roof'])
-    # roof faces down
+    # roof faces down; it must not block the dome light, which stands in for skylights + bounce light
     roof = stage.GetPrimAtPath('/World/Hall/Roof')
     UsdGeom.Mesh(roof).CreateNormalsAttr([(0, 0, -1)] * 4); UsdGeom.Mesh(roof).CreateDoubleSidedAttr(True)
+    roof.CreateAttribute('primvars:doNotCastShadows', Sdf.ValueTypeNames.Bool).Set(True)
     walls = [((X0, Y0), (X1, Y0), (0, 1)), ((X1, Y0), (X1, Y1), (-1, 0)),
              ((X1, Y1), (X0, Y1), (0, -1)), ((X0, Y1), (X0, Y0), (1, 0))]
     for i, (p0, p1, inward) in enumerate(walls):
@@ -140,40 +159,66 @@ def build_hall(stage, geometry, materials, rng, light_scale=1.):
         for j, y in enumerate((Y0 + .4, Y1 - .4)):
             _box(stage, f'/World/Hall/Column{i}_{j}', (x, y, H / 2), (.5, .5, H), 0., materials['steel'])
     _box(stage, '/World/Hall/Crane', ((X0 + X1) / 2, Y1 - 4., H - 1.6), (X1 - X0, .5, .5), 0., materials['yellow'])
-    # clutter only where it cannot intersect the track or its hoses
+    # clutter: outside the free band and clear of the hoses, but close enough to be seen
     tree = cKDTree(np.vstack(geometry.walls)); centre_tree = cKDTree(geometry.centerline)
-    objects = [('cabinet', materials['blue'], (1.0, .6, 2.0)), ('crate', materials['wood'], (1.2, .8, .9)),
-               ('machine', materials['dark'], (1.6, 1.0, 1.4)), ('cabinet', materials['grey'], (.9, .7, 1.8))]
+    objects = [(materials['blue'], (1.0, .6, 2.0)), (materials['wood'], (1.2, .8, .9)),
+               (materials['dark'], (1.6, 1.0, 1.4)), (materials['grey'], (.9, .7, 1.8)),
+               (materials['wood'], (.6, .4, .5)), (materials['grey'], (2.0, .8, 1.0))]
+    def clear(x, y, radius):
+        d_centre, i = centre_tree.query([x, y])
+        return (tree.query([x, y])[0] > radius + HOSE_RADIUS + .4 and
+                d_centre > geometry.half_width[i] + HOSE_RADIUS + radius + .4)
     placed = 0
-    for attempt in range(600):
-        if placed >= 28:
+    for _ in range(3000):
+        if placed >= 60:
             break
-        x = rng.uniform(X0 + 2, X1 - 2); y = rng.uniform(Y0 + 2, Y1 - 2)
-        name, material, size = objects[rng.integers(len(objects))]
-        radius = np.hypot(size[0], size[1]) / 2 + .4
-        if tree.query([x, y])[0] < radius + HOSE_RADIUS + 1.6 or centre_tree.query([x, y])[0] < radius + 2.:
+        x = rng.uniform(X0 + 1, X1 - 1); y = rng.uniform(Y0 + 1, Y1 - 1)
+        material, size = objects[rng.integers(len(objects))]
+        if not clear(x, y, np.hypot(size[0], size[1]) / 2):
             continue
         _box(stage, f'/World/Hall/Clutter{placed}', (x, y, size[2] / 2), size, rng.uniform(0, np.pi), material)
         placed += 1
-    # mocap tripod stand-ins (thin poles) around the perimeter of the track
-    for k, angle in enumerate(np.linspace(0, 2 * np.pi, 10, endpoint=False)):
-        cx, cy = (x0 + x1) / 2 + (x1 - x0) / 2 * 1.08 * np.cos(angle), (y0 + y1) / 2 + (y1 - y0) / 2 * 1.2 * np.sin(angle)
-        if tree.query([cx, cy])[0] < 1.6:
+    # mocap tripods: three legs + mast + camera head, just outside the hoses
+    placed = 0
+    for _ in range(3000):
+        if placed >= 16:
+            break
+        x = rng.uniform(x0, x1); y = rng.uniform(y0, y1)
+        if not clear(x, y, .6) or tree.query([x, y])[0] > 2.5:
             continue
-        _cylinder(stage, f'/World/Hall/Tripod{k}', (cx, cy, 1.6), .02, 3.2, materials['dark'])
-    # lighting: dim ambient dome + rows of ceiling panels
+        top = rng.uniform(1.8, 3.0); base = f'/World/Hall/Tripod{placed}'
+        UsdGeom.Xform.Define(stage, base)
+        for leg, angle in enumerate(np.linspace(0, 2 * np.pi, 3, endpoint=False) + rng.uniform(0, 2)):
+            _rod(stage, f'{base}/Leg{leg}', (x + .55 * np.cos(angle), y + .55 * np.sin(angle), 0.),
+                 (x, y, 1.1), .012, materials['dark'])
+        _rod(stage, f'{base}/Mast', (x, y, 1.0), (x, y, top), .018, materials['dark'])
+        _box(stage, f'{base}/Head', (x, y, top + .06), (.12, .1, .1), 0., materials['dark'])
+        placed += 1
+    # lighting: bright dome (skylights + bounce), ceiling panels, daylight windows high on the walls
     dome = UsdLux.DomeLight.Define(stage, '/World/Lighting/Ambient')
-    dome.CreateIntensityAttr(100. * light_scale); dome.CreateColorAttr((.92, .95, 1.))
+    dome.CreateIntensityAttr(1000. * light_scale); dome.CreateColorAttr((.95, .97, 1.))
     for i, y in enumerate(np.linspace(Y0 + 6., Y1 - 6., 5)):
         for j, x in enumerate(np.linspace(X0 + 8., X1 - 8., 7)):
             light = UsdLux.RectLight.Define(stage, f'/World/Lighting/Panel{i}_{j}')
             light.CreateWidthAttr(2.4); light.CreateHeightAttr(.4)
-            light.CreateIntensityAttr(6000. * light_scale); light.CreateColorAttr((1., .97, .92))
+            light.CreateIntensityAttr(20000. * light_scale); light.CreateColorAttr((1., .97, .92))
             # RectLight already emits along local -Z (down): no rotation
             UsdGeom.Xformable(light).AddTranslateOp().Set(Gf.Vec3d(x, y, H - .15))
+    for w, (p0, p1, inward) in enumerate(walls):
+        p0, p1, inward = np.array(p0), np.array(p1), np.array(inward, float)
+        length = np.linalg.norm(p1 - p0); along = (p1 - p0) / length
+        heading = np.degrees(np.arctan2(inward[1], inward[0])) - 90.
+        for k, t in enumerate(np.arange(3., length - 2., 5.)):
+            centre = p0 + along * t + inward * .05
+            light = UsdLux.RectLight.Define(stage, f'/World/Lighting/Window{w}_{k}')
+            light.CreateWidthAttr(2.0); light.CreateHeightAttr(1.6)
+            light.CreateIntensityAttr(8000. * light_scale); light.CreateColorAttr((.88, .93, 1.))
+            xf = UsdGeom.Xformable(light)
+            xf.AddTranslateOp().Set(Gf.Vec3d(centre[0], centre[1], H - 2.2))
+            xf.AddRotateZOp().Set(float(heading)); xf.AddRotateXOp().Set(90.)   # -Z -> inward
 
 
-def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1.):
+def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_LAYERS):
     from pxr import Usd, UsdGeom
     out = Path(out_dir); (out / 'textures').mkdir(parents=True, exist_ok=True)
     geometry = extract(map_yaml)
@@ -187,8 +232,8 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1.):
     UsdGeom.Xform.Define(stage, '/World'); stage.SetDefaultPrim(stage.GetPrimAtPath('/World'))
     M = lambda name, **kw: _material(stage, f'/World/Looks/{name}', **kw)
     materials = dict(
-        floor=M('Floor', color=(.5, .5, .48), roughness=.35, texture='./textures/floor.png', uv_scale=(1, 1)),
-        wall=M('Wall', color=(.78, .76, .70), roughness=.9),
+        floor=M('Floor', color=(.5, .5, .48), roughness=.4, texture='./textures/floor.png', uv_scale=(1, 1)),
+        wall=M('Wall', color=(.82, .81, .78), roughness=.9),
         roof=M('Roof', color=(.62, .64, .66), roughness=.5, metallic=.5),
         steel=M('Steel', color=(.12, .12, .13), roughness=.55, metallic=.6),
         yellow=M('Yellow', color=(.85, .62, .05), roughness=.5),
@@ -196,24 +241,24 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1.):
         wood=M('Wood', color=(.55, .42, .26), roughness=.8),
         dark=M('Dark', color=(.05, .05, .06), roughness=.6),
         grey=M('Grey', color=(.55, .56, .58), roughness=.6))
-    hose = M('Hose', color=(.86, .86, .83), roughness=.75, texture='./textures/hose_albedo.png',
+    hose = M('Hose', color=(.86, .86, .83), roughness=.6, texture='./textures/hose_albedo.png',
              normal='./textures/hose_normal.png')
     build_hall(stage, geometry, materials, rng, light_scale)
     UsdGeom.Xform.Define(stage, '/World/Track')
     for i, wall in enumerate(geometry.walls):
-        for layer, mesh in enumerate(stacked_hose_layers(wall, rng, HOSE_RADIUS, layers=HOSE_LAYERS, sides=sides)):
+        for layer, mesh in enumerate(stacked_hose_layers(wall, rng, HOSE_RADIUS, HOSE_FLATTEN, layers=hose_layers, sides=sides)):
             _mesh(stage, f'/World/Track/Hose{i}_L{layer}', mesh, hose)
     stage.GetRootLayer().Save()
 
     thin = lambda p, step: np.asarray(p)[::step].tolist()
     scenario = dict(
         name=f'synthetic {Path(map_yaml).stem}', usd='track.usd', map=str(map_yaml),
-        camera=CAMERA, sensors={'camera': CAMERA_MOUNT},
+        camera=CAMERA, sensors={'camera': CAMERA_MOUNT}, base_z=BASE_Z,
         rates={'dynamics': 50, 'camera': 20},
         reference_path=thin(geometry.centerline, 2), reference_spacing_m=.2,
         half_width=thin(geometry.half_width, 2),
         outer_boundary=thin(geometry.outer, 2), inner_boundaries=[thin(h, 2) for h in geometry.holes],
-        hose=dict(radius_m=HOSE_RADIUS, layers=HOSE_LAYERS),
+        hose=dict(radius_m=HOSE_RADIUS, layers=hose_layers, flatten=HOSE_FLATTEN),
         provenance=dict(hall='placeholder geometry, not a scan', walls_from='skeleton of map wall lines',
                         seed=seed))
     (out / 'scenario.json').write_text(json.dumps(scenario))
@@ -226,8 +271,9 @@ def main():
     parser.add_argument('--out', default='outputs/iros2026')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--light-scale', type=float, default=1., help='multiplies all light intensities (raise if frames are dark)')
+    parser.add_argument('--hose-layers', type=int, default=HOSE_LAYERS, choices=(1, 2))
     args = parser.parse_args()
-    geometry, usd = build(args.map, args.out, args.seed, light_scale=args.light_scale)
+    geometry, usd = build(args.map, args.out, args.seed, light_scale=args.light_scale, hose_layers=args.hose_layers)
     length = np.linalg.norm(np.diff(np.vstack([geometry.centerline, geometry.centerline[:1]]), axis=0), axis=1).sum()
     print(f'wrote {usd} | centerline {length:.1f} m | {len(geometry.walls)} hose segments')
 
