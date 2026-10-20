@@ -134,7 +134,7 @@ def run(args):
             if episode != current:
                 current = episode; meta[episode] = {k: v for k, v in setup.items() if k != 'state'}
                 meta[episode]['spawn'] = asdict(setup['state'])
-                set_lighting(setup['light_scale'], np.array(setup['light_tint']))
+                set_lighting(setup['light_scale'] * args.light_scale, np.array(setup['light_tint']))
             pose = place_camera(snapshot.vehicles['ego'])
             camera_pose = None
             if 'camera' in due:
@@ -173,6 +173,7 @@ def build_parser():
     parser.add_argument('--yaw-noise', type=float, default=.15, help='spawn heading noise (rad, 1 sigma)')
     parser.add_argument('--dynamics-checkpoint', help='Run30 GRU checkpoint (learned dynamics)')
     parser.add_argument('--kinematic', action='store_true', help='explicit diagnostic bicycle model instead of the GRU')
+    parser.add_argument('--light-scale', type=float, default=1., help='global brightness factor applied at run time (no rebuild needed)')
     parser.add_argument('--renderer', default='RealTimePathTracing')
     parser.add_argument('--subframes', type=int, default=3, help='RTX sub-frames per saved image (noise vs. speed)')
     parser.add_argument('--warmup', type=int, default=60)
