@@ -17,7 +17,7 @@ import json
 import math
 from pathlib import Path
 import numpy as np
-from racing.config import Schedule, pose_matrix, sensor_pose
+from racing.config import Schedule, sensor_pose
 from racing.core import RaceEngine, VehicleState
 
 
@@ -88,12 +88,12 @@ def episodes(scenario, model, args):
                 break
 
 
-def row(episode, snapshot, camera_pose=None):
+def row(episode, snapshot, frame_pose=None):
     out = {'episode_id': episode, 'step': snapshot.step_index, 'time_s': snapshot.time_s,
            'status': snapshot.status, 'reason': snapshot.reason, 'laps': dict(snapshot.laps),
            'vehicles': {k: asdict(v) for k, v in snapshot.vehicles.items()}}
-    if camera_pose is not None:
-        out['camera_to_world'] = np.asarray(camera_pose).tolist()
+    if frame_pose is not None:
+        out['camera_to_world'] = np.asarray(frame_pose).tolist()
     return out
 
 
@@ -115,7 +115,7 @@ def run(args):
         import carb
         import omni.usd
         import omni.replicator.core as rep
-        from pxr import UsdGeom, UsdLux, Gf
+        from pxr import UsdGeom, Gf
         from PIL import Image
         from racing.isaac_app import _camera
         context = omni.usd.get_context(); context.new_stage(); stage = context.get_stage()
@@ -153,15 +153,15 @@ def run(args):
                 meta[episode]['spawn'] = asdict(setup['state'])
                 set_lighting(setup['light_scale'] * args.light_scale, np.array(setup['light_tint']))
             pose = place_camera(snapshot.vehicles['ego'])
-            camera_pose = None
+            frame_pose = None
             if 'camera' in due:
                 rep.orchestrator.step(rt_subframes=args.subframes, delta_time=0., pause_timeline=False)
                 data = np.asarray(rgb.get_data())
                 if data.ndim != 3 or data.shape[:2] != (intrinsics['height'], intrinsics['width']) or data.dtype != np.uint8:
                     raise RuntimeError('camera did not produce a valid RGB frame')
                 Image.fromarray(data[:, :, :3]).save(output / 'frames' / f'ep{episode}_{snapshot.step_index:06d}.png')
-                camera_pose = pose; frames += 1
-            trace.write(json.dumps(row(episode, snapshot, camera_pose)) + '\n')
+                frame_pose = pose; frames += 1
+            trace.write(json.dumps(row(episode, snapshot, frame_pose)) + '\n')
             meta[episode]['end'] = dict(step=snapshot.step_index, time_s=snapshot.time_s, status=snapshot.status,
                                         reason=snapshot.reason, laps=dict(snapshot.laps))
         trace.close()

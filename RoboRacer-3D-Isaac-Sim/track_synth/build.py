@@ -72,7 +72,7 @@ def _material(stage, path, color, roughness=.6, metallic=0., texture=None, norma
 
 
 def _mesh(stage, path, data, material=None):
-    from pxr import UsdGeom, UsdShade, Vt, Gf, Sdf
+    from pxr import UsdGeom, UsdShade, Vt, Sdf
     mesh = UsdGeom.Mesh.Define(stage, path)
     mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(np.asarray(data['points'], dtype=np.float32)))
     mesh.CreateFaceVertexCountsAttr(Vt.IntArray.FromNumpy(np.asarray(data['counts'], dtype=np.int32)))

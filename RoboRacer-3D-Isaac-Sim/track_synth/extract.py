@@ -144,7 +144,6 @@ def trace_centerline(track, config, spacing=.1, sigma_m=.4):
     index = {tuple(c): i for i, c in enumerate(coords)}
     neighbours = [[index[(r + dr, c + dc)] for dr in (-1, 0, 1) for dc in (-1, 0, 1)
                    if (dr or dc) and (r + dr, c + dc) in index] for r, c in coords]
-    degrees = np.array([len(n) for n in neighbours])
     # walk the loop, preferring the neighbour that continues the heading
     start = int(np.argmin(coords[:, 1] + 1e-3 * coords[:, 0]))
     order = [start]; seen = {start}
