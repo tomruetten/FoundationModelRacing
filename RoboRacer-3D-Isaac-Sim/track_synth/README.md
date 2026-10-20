@@ -47,4 +47,7 @@ centre line with the GRU (or `--kinematic`) dynamics. Camera = the OAK-D intrins
 - The full racing pipeline (scene = 3DGS) cannot host this track: the scans cover a ~8 x 6 m track,
   the IROS layout is 52 x 31 m.
 - The GRU was trained on other surfaces/tracks; poses are exact simulator states, not real-car predictions.
+- Exposure is fixed by default (`--auto-exposure` opts in to the temporal one). Auto exposure adapts over
+  time, so the same pose gets different brightness depending on the frames before, and it cancels light changes.
+  `collect` prints `probe: ...` (4 renders of the first pose); a spread above 3 % means brightness still drifts.
 - Light intensities are uncalibrated; tune with `--light-scale/--fill-scale/--dome-scale` at collect time.

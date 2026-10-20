@@ -122,8 +122,10 @@ def run(args):
         stage.DefinePrim('/World', 'Xform').GetReferences().AddReference(scenario['usd_path'])
         UsdGeom.SetStageUpAxis(stage, 'Z'); UsdGeom.SetStageMetersPerUnit(stage, 1.)
         settings = carb.settings.get_settings()
-        # auto exposure: keeps frames usable while the (uncalibrated) light levels are tuned
-        settings.set('/rtx/post/histogram/enabled', not args.no_auto_exposure)
+        # Fixed exposure by default. Auto exposure adapts over time, so identical poses get different
+        # brightness depending on how many frames came before (first frame != later frames) and it
+        # cancels out --light-scale. Opt in with --auto-exposure.
+        settings.set('/rtx/post/histogram/enabled', bool(args.auto_exposure))
         intrinsics = scaled_intrinsics(scenario['camera'], args.image_scale)
         camera, camera_op = _camera(stage, '/World/EgoCamera', intrinsics)
         product = rep.create.render_product(str(camera.GetPath()), (intrinsics['width'], intrinsics['height']))
@@ -144,8 +146,12 @@ def run(args):
             usd_pose = pose.copy(); usd_pose[:3, :3] = pose[:3, :3] @ np.diag([1., -1., -1.])  # -> USD camera axes
             camera_op.Set(Gf.Matrix4d(usd_pose.T.tolist()))
             return pose
-        for _ in range(args.warmup):
-            app.update()
+        def render_frame():
+            rep.orchestrator.step(rt_subframes=args.subframes, delta_time=0., pause_timeline=False)
+            data = np.asarray(rgb.get_data())
+            if data.ndim != 3 or data.shape[:2] != (intrinsics['height'], intrinsics['width']) or data.dtype != np.uint8:
+                raise RuntimeError('camera did not produce a valid RGB frame')
+            return data[:, :, :3]
         trace = open(output / 'trajectory.jsonl', 'w'); meta = {}; frames = 0
         current = None
         for episode, setup, snapshot, due in episodes(scenario, model, args):
@@ -153,14 +159,21 @@ def run(args):
                 current = episode; meta[episode] = {k: v for k, v in setup.items() if k != 'state'}
                 meta[episode]['spawn'] = asdict(setup['state'])
                 set_lighting(setup['light_scale'] * args.light_scale, np.array(setup['light_tint']))
+                place_camera(snapshot.vehicles['ego'])
+                # let shaders, lights and the camera pose settle BEFORE the first saved frame
+                for _ in range(args.warmup if episode == 0 else args.episode_settle):
+                    app.update()
+                if episode == 0 and args.probe_frames:
+                    means = [render_frame().reshape(-1, 3).mean(0) for _ in range(args.probe_frames)]
+                    lum = [float(m @ [.2126, .7152, .0722]) for m in means]
+                    spread = (max(lum) - min(lum)) / max(np.mean(lum), 1e-6)
+                    print('probe: mean luminance of %d renders of the same pose: %s  (spread %.1f %%)%s' % (
+                        args.probe_frames, [round(v, 1) for v in lum], 100 * spread,
+                        '' if spread < .03 else '  -> brightness drifts between frames (auto exposure / temporal effect)'), flush=True)
             pose = place_camera(snapshot.vehicles['ego'])
             frame_pose = None
             if 'camera' in due:
-                rep.orchestrator.step(rt_subframes=args.subframes, delta_time=0., pause_timeline=False)
-                data = np.asarray(rgb.get_data())
-                if data.ndim != 3 or data.shape[:2] != (intrinsics['height'], intrinsics['width']) or data.dtype != np.uint8:
-                    raise RuntimeError('camera did not produce a valid RGB frame')
-                Image.fromarray(data[:, :, :3]).save(output / 'frames' / f'ep{episode}_{snapshot.step_index:06d}.png')
+                Image.fromarray(render_frame()).save(output / 'frames' / f'ep{episode}_{snapshot.step_index:06d}.png')
                 frame_pose = pose; frames += 1
             trace.write(json.dumps(row(episode, snapshot, frame_pose)) + '\n')
             meta[episode]['end'] = dict(step=snapshot.step_index, time_s=snapshot.time_s, status=snapshot.status,
@@ -194,7 +207,11 @@ def build_parser():
     parser.add_argument('--light-scale', type=float, default=1., help='global brightness factor applied at run time (no rebuild needed)')
     parser.add_argument('--dome-scale', type=float, default=1., help='brightness of the visible hall panorama only')
     parser.add_argument('--fill-scale', type=float, default=1., help='overhead fill light on hoses and floor (distant lights)')
-    parser.add_argument('--no-auto-exposure', action='store_true')
+    parser.add_argument('--auto-exposure', action='store_true',
+                        help='temporal auto exposure (brightness then depends on the frames before)')
+    parser.add_argument('--probe-frames', type=int, default=4,
+                        help='render the first pose this many times and print the brightness spread (0 = off)')
+    parser.add_argument('--episode-settle', type=int, default=5, help='render updates after the lighting change of a new episode')
     parser.add_argument('--camera-height', type=float, help='optical centre above the floor (m); default from scene (~0.25)')
     parser.add_argument('--image-scale', type=float, default=1., help='2 renders 1280x800 (same intrinsics, scaled)')
     parser.add_argument('--renderer', default='RealTimePathTracing')
