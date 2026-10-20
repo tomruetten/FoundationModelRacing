@@ -83,3 +83,29 @@ def test_camera_height_and_pitch_match_car02(tmp_path):
     assert camera_pose(scene, dict(x=0., y=0., yaw=0.), camera_height=.3)[2, 3] == pytest.approx(.3)
     big = scaled_intrinsics(scene['camera'], 2)
     assert (big['width'], big['height']) == (1280, 800) and big['fx'] == pytest.approx(2 * scene['camera']['fx'])
+
+
+def test_panorama_faces_land_in_latlong_convention():
+    from track_synth.splat_panorama import FACES, equirect_from_faces
+    colours = {name: np.full((32, 32, 3), 40 * (i + 1), np.uint8) for i, name in enumerate(FACES)}
+    pano = equirect_from_faces(colours, 256)
+    h, w = pano.shape[:2]
+    assert (pano[h // 2, w // 2] == colours['front'][0, 0]).all()      # image centre = forward
+    assert (pano[h // 2, w // 4] == colours['left'][0, 0]).all()       # +lon (left half) = left
+    assert (pano[h // 2, 3 * w // 4] == colours['right'][0, 0]).all()
+    assert (pano[0, w // 3] == colours['up'][0, 0]).all() and (pano[-1, w // 3] == colours['down'][0, 0]).all()
+
+
+def test_build_with_panorama_and_real_floor(tmp_path):
+    pytest.importorskip('pxr')
+    from pxr import Usd, UsdLux
+    from PIL import Image
+    from track_synth.build import build, REFERENCE
+    pano = tmp_path / 'pano.png'; Image.new('RGB', (64, 32), (120, 120, 120)).save(pano)
+    out = tmp_path / 'scene'
+    build(MAP, out, seed=0, sides=8, floor_texture=REFERENCE / 'floor_real.jpg', hdri=pano)
+    stage = Usd.Stage.Open(str(out / 'track.usd'))
+    dome = UsdLux.DomeLight(stage.GetPrimAtPath('/World/Lighting/HallPanorama'))
+    assert dome.GetTextureFileAttr().Get().path == './textures/hall_pano.png'
+    assert not stage.GetPrimAtPath('/World/Hall/Wall0').IsValid()        # placeholder hall replaced
+    assert (out / 'textures/floor.jpg').exists() and (out / 'textures/hall_pano.png').exists()
