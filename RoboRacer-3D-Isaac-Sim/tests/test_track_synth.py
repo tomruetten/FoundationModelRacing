@@ -210,3 +210,26 @@ def test_acceleration_limits_match_the_car02_reference_raceline():
     path = np.c_[tuple(splev(fine, tck))]
     lateral = np.interp(fine, np.linspace(0, 1, len(x), endpoint=False), v, period=1) ** 2 * np.abs(curvature(path, .1))
     assert lateral.max() == pytest.approx(vehicle.A_LAT, abs=.05)
+
+
+def test_collision_polygons_sit_on_the_hose_surface(raceline_scene):
+    from track_synth.build import HOSE_RADIUS, WALL_HALF_LINE
+    from track_synth.collect import hose_clearance
+    from matplotlib.path import Path as P
+    scene = load_scene(raceline_scene)
+    plain = extract(MAP)
+    # polygon edge ~ hose surface: the free-space edge is WALL_HALF_LINE from the hose centre, so the polygon
+    # sits (HOSE_RADIUS - WALL_HALF_LINE) inside it
+    outer = np.array(scene['outer_boundary'])
+    shrink = np.min(np.linalg.norm(plain.outer[None, :, :] - outer[::5, None, :], axis=2), axis=1)
+    assert np.median(shrink) == pytest.approx(HOSE_RADIUS - WALL_HALF_LINE, abs=.03)
+    # a car standing on the polygon edge touches the hose surface (clearance ~ 0), one on the raceline does not
+    from racing.core import VehicleState
+    on_line = VehicleState(x=float(scene['raceline'][0, 0]), y=float(scene['raceline'][0, 1]), yaw=0.)
+    assert hose_clearance(scene, on_line) > .15
+
+
+def test_raceline_keeps_the_car_clear_of_the_hoses(raceline_scene):
+    scene = load_scene(raceline_scene)
+    from track_synth.build import CLEARANCE
+    assert scene['raceline_clearance'].min() >= CLEARANCE + .13 - .02      # hose surface to line >= half width + clearance

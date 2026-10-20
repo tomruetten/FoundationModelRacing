@@ -30,7 +30,7 @@ reference raceline, the validated adaptive-lookahead Pure Pursuit of `closed_loo
 Driving line: `build` also computes a lap-time-oriented racing line (bounded least squares, minimum curvature
 blended with shortest path, curvature kept below the steering limit) and a friction-limited speed profile
 (`--v-max 2.5 --a-lat 2.8 --a-acc 2.2 --a-dec 2.5`); `preview` plots it (`raceline.png`). `collect --driver raceline`
-(default) follows it with that Pure Pursuit at 0.75-1.0x the profile speed (`--speed-scale-min/max`),
+(default) follows it with that Pure Pursuit at 0.45-0.6x the profile speed (`--speed-scale-min/max`, about 1.0-1.5 m/s),
 starts rolling at that speed with small lateral / heading offsets (`--max-lateral 0.15`, `--yaw-noise 0.05`) and
 drives `--lead-in 2` s before the first frame. `--driver centerline` = constant speed on the centre line.
 
@@ -63,6 +63,15 @@ centre line with the GRU (or `--kinematic`) dynamics. Camera = the OAK-D intrins
   horizon is tilted, rebuild with `--dome-rotate-x 90`.
 - The full racing pipeline (scene = 3DGS) cannot host this track: the scans cover a ~8 x 6 m track,
   the IROS layout is 52 x 31 m.
+- Speed envelope with the Run30 GRU in the loop (measured with `collect.episodes` on this track, 9 episodes of 25 s
+  per setting): speed scale 0.4 and 0.6 (mean 0.9 / 1.35 m/s) all complete without contact (min hose clearance
+  0.17-0.27 m); 0.75 (1.6 m/s) ends in contact in 6-7 of 9 episodes, 0.88 and 1.0 in all of them (the car snakes with
+  +-1.5 rad/s yaw rate, a longer lookahead helps only a little). The repo validated this controller at 0.8-1.0 m/s.
+  So the 77 s lap time of the profile is not reachable with this GRU; the achievable lap is ~130 s.
+  A kinematic model (`--kinematic`) follows the line at full speed.
+- Collision polygons sit on the hose surface (free-space edge shrunk by hose radius - half line width); the racing line
+  keeps 0.28 m between the car side and the hose surface. `trajectory.jsonl` rows carry `hose_clearance_m`,
+  `dataset.json` the per-episode minimum.
 - The racing line is a minimum-curvature / shortest-path blend scored by lap time, not a full minimum-time
   optimal control solution; speed limits (`a_lat` etc.) are assumptions, not measured Car02 grip. The tightest
   corner needs ~0.8 1/m (radius 1.2 m) against a steering limit of ~0.9 1/m: little margin for the learned dynamics.

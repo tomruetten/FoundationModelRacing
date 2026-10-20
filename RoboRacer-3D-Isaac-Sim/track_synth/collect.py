@@ -60,9 +60,9 @@ class ProfileEngine(RaceEngine):
     curvature-adaptive lookahead ld = clip(0.5 / (1 + 3 |kappa|), 0.3, 2.0), goal = first path point at
     distance >= ld, delta = atan2(2 L sin(alpha), ld). Speed = per-point reference profile (racing line)
     or a constant, clamped to the GRU training range 0.3..2.5 m/s."""
-    def __init__(self, *args, speed=None, **kwargs):
+    def __init__(self, *args, speed=None, lookahead_time=0., **kwargs):
         self.profile = None if speed is None else np.asarray(speed, dtype=float)
-        self.speed_scale = 1.
+        self.speed_scale = 1.; self.lookahead_time = lookahead_time
         super().__init__(*args, **kwargs)
         if self.profile is not None and len(self.profile) != len(self.path):
             raise ValueError('speed profile and path must have the same number of points')
@@ -79,7 +79,8 @@ class ProfileEngine(RaceEngine):
         progress = self._project(state)
         n = len(self.path)
         closest = min(int(np.searchsorted(self._cumulative, progress, side='right') - 1), n - 1)
-        ld = float(np.clip(vehicle.LOOKAHEAD / (1. + vehicle.LD_CURVE_K * self._kappa[closest]), vehicle.LD_MIN, vehicle.LD_MAX))
+        base = vehicle.LOOKAHEAD + self.lookahead_time * max(state.vx, 0.)
+        ld = float(np.clip(base / (1. + vehicle.LD_CURVE_K * self._kappa[closest]), vehicle.LD_MIN, vehicle.LD_MAX))
         ahead = self.path[(closest + np.arange(min(n, int(4. / max(self._lengths.mean(), 1e-3))))) % n]
         distance = np.hypot(ahead[:, 0] - state.x, ahead[:, 1] - state.y)
         far = np.nonzero(distance >= ld)[0]
@@ -96,7 +97,7 @@ def make_engine(scenario, model, args):
                          outer_boundary=scenario['outer_boundary'], inner_boundaries=scenario['inner_boundaries'],
                          dt=1 / scenario['rates']['dynamics'], opponent_speed=args.speed_max,
                          lookahead=args.lookahead, max_speed=vehicle.SPEED_MAX, max_steering=vehicle.MAX_STEERING,
-                         speed=speed)
+                         speed=speed, lookahead_time=args.lookahead_time)
 
 
 def sample_episode(scenario, rng, args):
@@ -147,12 +148,23 @@ def episodes(scenario, model, args):
                 break
 
 
-def row(episode, snapshot, frame_pose=None):
+def hose_clearance(scenario, state, tree=None):
+    """Distance from the car rectangle (nearest corner) to the hose surface, m; negative = inside."""
+    from racing.geometry import rectangle
+    if tree is None:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(np.asarray(scenario['hose_points']))
+    return float(tree.query(rectangle(state))[0].min() - scenario['hose']['radius_m'])
+
+
+def row(episode, snapshot, frame_pose=None, clearance=None):
     out = {'episode_id': episode, 'step': snapshot.step_index, 'time_s': snapshot.time_s,
            'status': snapshot.status, 'reason': snapshot.reason, 'laps': dict(snapshot.laps),
            'vehicles': {k: asdict(v) for k, v in snapshot.vehicles.items()}}
     if frame_pose is not None:
         out['camera_to_world'] = np.asarray(frame_pose).tolist()
+    if clearance is not None:
+        out['hose_clearance_m'] = round(clearance, 3)
     return out
 
 
@@ -211,6 +223,8 @@ def run(args):
             if data.ndim != 3 or data.shape[:2] != (intrinsics['height'], intrinsics['width']) or data.dtype != np.uint8:
                 raise RuntimeError('camera did not produce a valid RGB frame')
             return data[:, :, :3]
+        from scipy.spatial import cKDTree
+        hose_tree = cKDTree(np.asarray(scenario['hose_points']))
         trace = open(output / 'trajectory.jsonl', 'w'); meta = {}; frames = 0
         current = None
         for episode, setup, snapshot, due in episodes(scenario, model, args):
@@ -234,7 +248,9 @@ def run(args):
             if 'camera' in due:
                 Image.fromarray(render_frame()).save(output / 'frames' / f'ep{episode}_{snapshot.step_index:06d}.png')
                 frame_pose = pose; frames += 1
-            trace.write(json.dumps(row(episode, snapshot, frame_pose)) + '\n')
+            clearance = hose_clearance(scenario, snapshot.vehicles['ego'], hose_tree)
+            trace.write(json.dumps(row(episode, snapshot, frame_pose, clearance)) + '\n')
+            meta[episode]['min_hose_clearance_m'] = min(meta[episode].get('min_hose_clearance_m', 9.), round(clearance, 3))
             meta[episode]['end'] = dict(step=snapshot.step_index, time_s=snapshot.time_s, status=snapshot.status,
                                         reason=snapshot.reason, laps=dict(snapshot.laps))
         trace.close()
@@ -258,12 +274,16 @@ def build_parser():
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--driver', choices=('raceline', 'centerline'), default='raceline',
                         help='raceline: lap-time-optimised line + speed profile; centerline: constant speed on the centre line')
-    parser.add_argument('--speed-scale-min', type=float, default=.75, help='raceline driver: per-episode speed factor range')
-    parser.add_argument('--speed-scale-max', type=float, default=1.0)
+    parser.add_argument('--speed-scale-min', type=float, default=.45,
+                        help='raceline driver: per-episode speed factor range. With the Run30 GRU in the loop the tracking is '
+                             'stable up to ~0.6 (about 1.0-1.5 m/s); from ~0.75 the car snakes and touches the hose')
+    parser.add_argument('--speed-scale-max', type=float, default=.6)
     parser.add_argument('--speed-min', type=float, default=1.0, help='centerline driver: constant speed range (m/s)')
     parser.add_argument('--speed-max', type=float, default=2.0, help='(GRU training range: 0.3 .. 2.5 m/s)')
     parser.add_argument('--lead-in', type=float, default=2.0, help='seconds of driving before the first camera frame')
     parser.add_argument('--lookahead', type=float, default=vehicle.LOOKAHEAD, help=argparse.SUPPRESS)
+    parser.add_argument('--lookahead-time', type=float, default=0.,
+                        help='seconds added to the 0.5 m base lookahead per m/s of speed (0 = the repo controller as validated at <= 1 m/s)')
     parser.add_argument('--max-lateral', type=float, default=.15, help='max spawn offset from the driving line (m)')
     parser.add_argument('--hose-clearance', type=float, default=.5, help='keep spawns this far from the free edge (m)')
     parser.add_argument('--yaw-noise', type=float, default=.05, help='spawn heading noise (rad, 1 sigma)')

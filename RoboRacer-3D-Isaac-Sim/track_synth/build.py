@@ -17,6 +17,8 @@ from .vehicle import camera_intrinsics, camera_mount
 from .meshes import (stacked_hose_layers, corrugation_normal_map, hose_albedo, concrete_albedo)
 
 HOSE_RADIUS = .15      # 30 cm diameter
+WALL_HALF_LINE = .08   # half thickness of the map's wall lines (measured: 3-4 px at 5 cm): hose centre to free-space edge
+CLEARANCE = .28        # racing-line clearance between the car's side and the hose surface (m)
 HOSE_LAYERS = 2
 HOSE_FLATTEN = .68     # padded hoses are wider than tall: vertical / horizontal radius
 UPPER_LAYER_FRACTION = 1.   # share of the wall length with a second, stacked hose (1 = two layers everywhere)
@@ -254,7 +256,8 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
           raceline=True, line_limits=None, line_mus=None):
     from pxr import Usd, UsdGeom
     out = Path(out_dir); (out / 'textures').mkdir(parents=True, exist_ok=True)
-    geometry = extract(map_yaml)
+    # collision polygons sit on the hose SURFACE: free-space edge shrunk by (hose radius - half line width)
+    geometry = extract(map_yaml, boundary_erode_m=max(HOSE_RADIUS - WALL_HALF_LINE, 0.))
     rng = np.random.default_rng(seed)
     if floor_texture and Path(floor_texture).exists():
         floor_file = 'floor' + Path(floor_texture).suffix
@@ -304,7 +307,7 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
         kwargs = dict(line_limits or {})
         if line_mus:
             kwargs['mus'] = line_mus
-        margin = HOSE_RADIUS + vehicle.WIDTH / 2 + .12          # hose radius + half car width + safety
+        margin = HOSE_RADIUS + vehicle.WIDTH / 2 + CLEARANCE      # hose radius + half car width + clearance
         best = optimise_line(geometry.centerline, geometry.half_width, margin=margin, **kwargs)
         wall_tree = cKDTree(np.vstack(geometry.walls))
         clearance = wall_tree.query(best['path'])[0] - HOSE_RADIUS
@@ -325,6 +328,7 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
         half_width=thin(geometry.half_width, 2),
         outer_boundary=thin(geometry.outer, 2), inner_boundaries=[thin(h, 2) for h in geometry.holes],
         hose=dict(radius_m=HOSE_RADIUS, layers=hose_layers, flatten=HOSE_FLATTEN, upper_fraction=upper_fraction),
+        hose_points=np.vstack(geometry.walls)[::2].tolist(),
         **line,
         provenance=dict(hall=f'3DGS panorama {Path(hdri).name}' if hdri else 'placeholder geometry, not a scan',
                         floor=f'texture {Path(floor_texture).name}' if floor_texture else 'procedural',

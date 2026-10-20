@@ -167,8 +167,11 @@ def trace_centerline(track, config, spacing=.1, sigma_m=.4):
     return resample(xy, spacing, closed=True)
 
 
-def boundaries(track, config):
+def boundaries(track, config, erode_m=0.):
+    """Outer / hole polygons of the free band, optionally shrunk by `erode_m` (sub-pixel, via EDT)."""
     import cv2
+    if erode_m > 0:
+        track = ndi.distance_transform_edt(track) * config['resolution'] > erode_m
     contours, hierarchy = cv2.findContours(track.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
     height = track.shape[0]
     outer, holes = None, []
@@ -183,7 +186,7 @@ def boundaries(track, config):
     return outer, holes
 
 
-def extract(yaml_path, spacing=.1):
+def extract(yaml_path, spacing=.1, boundary_erode_m=0.):
     config = load_yaml(yaml_path)
     occupied = occupancy(config)
     walls, track = split_map(occupied)
@@ -193,7 +196,7 @@ def extract(yaml_path, spacing=.1):
     rows = height - 1 - ((centerline[:, 1] - config['origin'][1]) / config['resolution']).astype(int)
     cols = ((centerline[:, 0] - config['origin'][0]) / config['resolution']).astype(int)
     half_width = distance[np.clip(rows, 0, height - 1), np.clip(cols, 0, track.shape[1] - 1)]
-    outer, holes = boundaries(track, config)
+    outer, holes = boundaries(track, config, boundary_erode_m)
     width = track.shape[1]
     bounds = (config['origin'][0], config['origin'][1],
               config['origin'][0] + width * config['resolution'], config['origin'][1] + height * config['resolution'])
