@@ -31,7 +31,14 @@ centre line with the GRU (or `--kinematic`) dynamics. Camera = the OAK-D intrins
 ## Assumptions to check
 - Map wall lines are taken as hose **centres**. The free width is ~2.2 m between the drawn lines,
   so about 1.9 m between hose surfaces.
-- Hose: 30 cm diameter, vertically flattened (0.82), two layers; no cones, no floor markings.
+- Hose: 30 cm diameter, soft (flattened to 0.72, irregular width, pinched stretches), brown straps every
+  ~1.8 m. A second stacked layer covers `--upper-fraction` of the wall (default 0.5, random stretches,
+  tapering at the ends) because the real boundary is mostly single-layer; `--upper-fraction 1` stacks everywhere.
+  No cones, no floor markings.
+- Lighting (with `--hdri`): `collect.py --dome-scale` changes only the visible panorama, `--fill-scale`
+  (default 2) only the light on hoses and floor, `--light-scale` both. The fill dome relies on the
+  Omniverse attribute `visibleInPrimaryRay=False`; if the background gets brighter with `--fill-scale`,
+  that attribute is not honoured and the fill dome has to be dropped.
 - With `--hdri` the hall is a 360° render of the New1 3DGS at 1 m height, used as an infinitely
   distant dome (no parallax) and as image-based light. Without it, a placeholder hall is generated.
   If the panorama horizon is tilted or vertical, rebuild with `--dome-rotate-x 90` (USD dome

@@ -42,9 +42,20 @@ def test_sweep_tube_is_consistent():
 
 def test_hose_layers_stack_without_penetration():
     path = np.c_[np.linspace(0, 5, 51), np.zeros(51)]
-    lower, upper = stacked_hose_layers(path, np.random.default_rng(0), layers=2, sides=12)
-    assert upper['points'][:, 2].min() >= lower['points'][:, 2].min() + .2
-    assert 0.4 < upper['points'][:, 2].max() < 0.55   # two 30 cm hoses, flattened by their own weight
+    (lower, upper), straps = stacked_hose_layers(path, np.random.default_rng(0), layers=2, sides=12, upper_fraction=1.)
+    low, up = lower['points'][:-2].reshape(51, 12, 3), upper['points'][:-2].reshape(51, 12, 3)
+    assert (up[..., 2].min(1) >= low[..., 2].min(1) + .03).all()        # upper hose rests on the lower one
+    assert (up[..., 2].min(1) <= low[..., 2].max(1) + .01).all()        # ... and touches it (no floating)
+    assert 0.25 < upper['points'][:, 2].max() < 0.55                    # two soft 30 cm hoses
+    assert 2 <= len(straps) <= 5                        # straps every ~1.8 m
+
+
+def test_upper_layer_only_on_part_of_the_wall():
+    path = np.c_[np.linspace(0, 30, 301), np.zeros(301)]
+    (lower, upper), _ = stacked_hose_layers(path, np.random.default_rng(1), layers=2, sides=12, upper_fraction=.4)
+    ring = upper['points'][:-2].reshape(301, 12, 3)
+    height = ring[..., 2].max(1) - ring[..., 2].min(1)
+    assert .2 < (height > .12).mean() < .8             # stacked hose present on some, not all, of the wall
 
 
 def test_usd_scene_builds(tmp_path):

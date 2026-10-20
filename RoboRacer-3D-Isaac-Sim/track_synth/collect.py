@@ -136,7 +136,8 @@ def run(args):
         def set_lighting(scale, tint):
             for path, (intensity, color) in lights.items():
                 prim = stage.GetPrimAtPath(path)
-                prim.GetAttribute('inputs:intensity').Set(float(intensity * scale))
+                factor = args.dome_scale if path.name == 'HallPanorama' else args.fill_scale if path.name == 'FillDome' else 1.
+                prim.GetAttribute('inputs:intensity').Set(float(intensity * scale * factor))
                 prim.GetAttribute('inputs:color').Set(Gf.Vec3f(*(np.array(color) * tint)))
         def place_camera(state):
             pose = camera_pose(scenario, state, args.camera_height)   # optical RDF in world
@@ -191,6 +192,8 @@ def build_parser():
     parser.add_argument('--dynamics-checkpoint', help='Run30 GRU checkpoint (learned dynamics)')
     parser.add_argument('--kinematic', action='store_true', help='explicit diagnostic bicycle model instead of the GRU')
     parser.add_argument('--light-scale', type=float, default=1., help='global brightness factor applied at run time (no rebuild needed)')
+    parser.add_argument('--dome-scale', type=float, default=1., help='brightness of the visible hall panorama only')
+    parser.add_argument('--fill-scale', type=float, default=2., help='extra light on hoses and floor (hidden fill dome)')
     parser.add_argument('--no-auto-exposure', action='store_true')
     parser.add_argument('--camera-height', type=float, help='optical centre above the floor (m); default from scene (~0.25)')
     parser.add_argument('--image-scale', type=float, default=1., help='2 renders 1280x800 (same intrinsics, scaled)')

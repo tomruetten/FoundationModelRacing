@@ -17,6 +17,7 @@ from .meshes import (stacked_hose_layers, corrugation_normal_map, hose_albedo, c
 HOSE_RADIUS = .15      # 30 cm diameter
 HOSE_LAYERS = 2
 HOSE_FLATTEN = .72     # soft hoses sag: vertical / horizontal radius
+UPPER_LAYER_FRACTION = .5   # share of the wall length with a second, stacked hose (real boundary: mostly single)
 HALL_MARGIN = (7., 7.)  # hall extends this far past the map bounds (x, y)
 HALL_HEIGHT = 9.
 # Camera intrinsics and mount rotation from configs/racing_142014.json (OAK-D Pro W on Car02).
@@ -34,7 +35,7 @@ FLOOR_TILE_M = 4.096   # real_textures.py: 2048 px at 2 mm
 
 def build_backdrop(stage, geometry, materials, hdri, light_scale, rotate_x, rotate_z):
     """Real-hall panorama (3DGS render) as visible dome + image-based light, large floor plane."""
-    from pxr import UsdGeom, UsdLux
+    from pxr import UsdGeom, UsdLux, Sdf
     x0, y0, x1, y1 = geometry.bounds
     m = 150.
     UsdGeom.Xform.Define(stage, '/World/Hall')
@@ -45,6 +46,14 @@ def build_backdrop(stage, geometry, materials, hdri, light_scale, rotate_x, rota
     dome.CreateIntensityAttr(1000. * light_scale)
     xf = UsdGeom.Xformable(dome)
     xf.AddRotateZOp().Set(float(rotate_z)); xf.AddRotateXOp().Set(float(rotate_x))
+    # Fill dome: same panorama, hidden from the camera, only adds light to hoses and floor. Lets the
+    # track be brightened independently of the visible background (collect.py --fill-scale).
+    fill = UsdLux.DomeLight.Define(stage, '/World/Lighting/FillDome')
+    fill.CreateTextureFileAttr(hdri); fill.CreateTextureFormatAttr('latlong')
+    fill.CreateIntensityAttr(1000. * light_scale); fill.CreateColorAttr((1., .97, .92))
+    fill.GetPrim().CreateAttribute('visibleInPrimaryRay', Sdf.ValueTypeNames.Bool).Set(False)
+    fxf = UsdGeom.Xformable(fill)
+    fxf.AddRotateZOp().Set(float(rotate_z)); fxf.AddRotateXOp().Set(float(rotate_x))
 
 
 def _material(stage, path, color, roughness=.6, metallic=0., texture=None, normal=None, uv_scale=None, emissive=None):
@@ -237,7 +246,7 @@ def build_hall(stage, geometry, materials, rng, light_scale=1.):
 
 
 def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_LAYERS,
-          floor_texture=None, hdri=None, dome_rotate=(0., 0.)):
+          floor_texture=None, hdri=None, dome_rotate=(0., 0.), upper_fraction=UPPER_LAYER_FRACTION):
     from pxr import Usd, UsdGeom
     out = Path(out_dir); (out / 'textures').mkdir(parents=True, exist_ok=True)
     geometry = extract(map_yaml)
@@ -251,14 +260,14 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
     if hdri:
         shutil.copy(hdri, out / 'textures' / ('hall_pano' + Path(hdri).suffix))
     Image.fromarray(hose_albedo(seed=seed)).save(out / 'textures/hose_albedo.png')
-    Image.fromarray(corrugation_normal_map()).save(out / 'textures/hose_normal.png')
+    Image.fromarray(corrugation_normal_map(seed=seed)).save(out / 'textures/hose_normal.png')
     usd_path = out / 'track.usd'
     stage = Usd.Stage.CreateNew(str(usd_path))
     UsdGeom.SetStageUpAxis(stage, 'Z'); UsdGeom.SetStageMetersPerUnit(stage, 1.)
     UsdGeom.Xform.Define(stage, '/World'); stage.SetDefaultPrim(stage.GetPrimAtPath('/World'))
     M = lambda name, **kw: _material(stage, f'/World/Looks/{name}', **kw)
     materials = dict(
-        floor=M('Floor', color=(.5, .5, .48), roughness=.45, texture=f'./textures/{floor_file}', uv_scale=(1, 1)),
+        floor=M('Floor', color=(.5, .5, .48), roughness=.35, texture=f'./textures/{floor_file}', uv_scale=(1, 1)),
         wall=M('Wall', color=(.82, .81, .78), roughness=.9),
         roof=M('Roof', color=(.62, .64, .66), roughness=.5, metallic=.5),
         steel=M('Steel', color=(.12, .12, .13), roughness=.55, metallic=.6),
@@ -267,16 +276,21 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
         wood=M('Wood', color=(.55, .42, .26), roughness=.8),
         dark=M('Dark', color=(.05, .05, .06), roughness=.6),
         grey=M('Grey', color=(.55, .56, .58), roughness=.6))
-    hose = M('Hose', color=(.86, .86, .83), roughness=.6, texture='./textures/hose_albedo.png',
+    hose = M('Hose', color=(.86, .86, .83), roughness=.8, texture='./textures/hose_albedo.png',
              normal='./textures/hose_normal.png')
+    strap = M('Strap', color=(.20, .12, .07), roughness=.7)
     if hdri:
         build_backdrop(stage, geometry, materials, './textures/hall_pano' + Path(hdri).suffix, light_scale, *dome_rotate)
     else:
         build_hall(stage, geometry, materials, rng, light_scale)
     UsdGeom.Xform.Define(stage, '/World/Track')
     for i, wall in enumerate(geometry.walls):
-        for layer, mesh in enumerate(stacked_hose_layers(wall, rng, HOSE_RADIUS, HOSE_FLATTEN, layers=hose_layers, sides=sides)):
+        hoses, straps = stacked_hose_layers(wall, rng, HOSE_RADIUS, HOSE_FLATTEN, layers=hose_layers, sides=sides,
+                                            upper_fraction=upper_fraction)
+        for layer, mesh in enumerate(hoses):
             _mesh(stage, f'/World/Track/Hose{i}_L{layer}', mesh, hose)
+        for k, mesh in enumerate(straps):
+            _mesh(stage, f'/World/Track/Strap{i}_{k}', mesh, strap)
     stage.GetRootLayer().Save()
 
     thin = lambda p, step: np.asarray(p)[::step].tolist()
@@ -287,7 +301,7 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
         reference_path=thin(geometry.centerline, 2), reference_spacing_m=.2,
         half_width=thin(geometry.half_width, 2),
         outer_boundary=thin(geometry.outer, 2), inner_boundaries=[thin(h, 2) for h in geometry.holes],
-        hose=dict(radius_m=HOSE_RADIUS, layers=hose_layers, flatten=HOSE_FLATTEN),
+        hose=dict(radius_m=HOSE_RADIUS, layers=hose_layers, flatten=HOSE_FLATTEN, upper_fraction=upper_fraction),
         provenance=dict(hall=f'3DGS panorama {Path(hdri).name}' if hdri else 'placeholder geometry, not a scan',
                         floor=f'texture {Path(floor_texture).name}' if floor_texture else 'procedural',
                         walls_from='skeleton of map wall lines', seed=seed))
@@ -302,6 +316,8 @@ def main():
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--light-scale', type=float, default=1., help='multiplies all light intensities (raise if frames are dark)')
     parser.add_argument('--hose-layers', type=int, default=HOSE_LAYERS, choices=(1, 2))
+    parser.add_argument('--upper-fraction', type=float, default=UPPER_LAYER_FRACTION,
+                        help='share of the wall length with a second stacked hose (1 = everywhere)')
     parser.add_argument('--floor-texture', default=str(REFERENCE / 'floor_real.jpg'),
                         help='tileable floor albedo, 4.096 m per tile (track_synth.real_textures); missing -> procedural')
     parser.add_argument('--hdri', help='latlong hall panorama (track_synth.splat_panorama); replaces the placeholder hall')
@@ -310,7 +326,7 @@ def main():
     args = parser.parse_args()
     geometry, usd = build(args.map, args.out, args.seed, light_scale=args.light_scale, hose_layers=args.hose_layers,
                           floor_texture=args.floor_texture, hdri=args.hdri,
-                          dome_rotate=(args.dome_rotate_x, args.dome_rotate_z))
+                          dome_rotate=(args.dome_rotate_x, args.dome_rotate_z), upper_fraction=args.upper_fraction)
     length = np.linalg.norm(np.diff(np.vstack([geometry.centerline, geometry.centerline[:1]]), axis=0), axis=1).sum()
     print(f'wrote {usd} | centerline {length:.1f} m | {len(geometry.walls)} hose segments')
 
