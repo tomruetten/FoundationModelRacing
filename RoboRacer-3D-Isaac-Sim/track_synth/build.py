@@ -17,7 +17,7 @@ from .meshes import (stacked_hose_layers, corrugation_normal_map, hose_albedo, c
 HOSE_RADIUS = .15      # 30 cm diameter
 HOSE_LAYERS = 2
 HOSE_FLATTEN = .72     # soft hoses sag: vertical / horizontal radius
-UPPER_LAYER_FRACTION = .5   # share of the wall length with a second, stacked hose (real boundary: mostly single)
+UPPER_LAYER_FRACTION = 1.   # share of the wall length with a second, stacked hose (1 = two layers everywhere)
 HALL_MARGIN = (7., 7.)  # hall extends this far past the map bounds (x, y)
 HALL_HEIGHT = 9.
 # Camera intrinsics and mount rotation from configs/racing_142014.json (OAK-D Pro W on Car02).
@@ -35,7 +35,7 @@ FLOOR_TILE_M = 4.096   # real_textures.py: 2048 px at 2 mm
 
 def build_backdrop(stage, geometry, materials, hdri, light_scale, rotate_x, rotate_z):
     """Real-hall panorama (3DGS render) as visible dome + image-based light, large floor plane."""
-    from pxr import UsdGeom, UsdLux, Sdf
+    from pxr import UsdGeom, UsdLux
     x0, y0, x1, y1 = geometry.bounds
     m = 150.
     UsdGeom.Xform.Define(stage, '/World/Hall')
@@ -46,14 +46,14 @@ def build_backdrop(stage, geometry, materials, hdri, light_scale, rotate_x, rota
     dome.CreateIntensityAttr(1000. * light_scale)
     xf = UsdGeom.Xformable(dome)
     xf.AddRotateZOp().Set(float(rotate_z)); xf.AddRotateXOp().Set(float(rotate_x))
-    # Fill dome: same panorama, hidden from the camera, only adds light to hoses and floor. Lets the
-    # track be brightened independently of the visible background (collect.py --fill-scale).
-    fill = UsdLux.DomeLight.Define(stage, '/World/Lighting/FillDome')
-    fill.CreateTextureFileAttr(hdri); fill.CreateTextureFormatAttr('latlong')
-    fill.CreateIntensityAttr(1000. * light_scale); fill.CreateColorAttr((1., .97, .92))
-    fill.GetPrim().CreateAttribute('visibleInPrimaryRay', Sdf.ValueTypeNames.Bool).Set(False)
-    fxf = UsdGeom.Xformable(fill)
-    fxf.AddRotateZOp().Set(float(rotate_z)); fxf.AddRotateXOp().Set(float(rotate_x))
+    # Only ONE dome light: RTX uses a single environment, a second dome replaced the visible panorama
+    # (black background). Extra light on hoses and floor comes from DistantLights, which have no
+    # visible emitter: two soft overhead "lamps" (collect.py --fill-scale).
+    for k, (tilt, yaw, intensity) in enumerate(((20., 0., 900.), (25., 180., 450.))):
+        sun = UsdLux.DistantLight.Define(stage, f'/World/Lighting/FillSun{k}')
+        sun.CreateAngleAttr(25.); sun.CreateIntensityAttr(intensity * light_scale); sun.CreateColorAttr((1., .96, .90))
+        sxf = UsdGeom.Xformable(sun)
+        sxf.AddRotateZOp().Set(yaw); sxf.AddRotateXOp().Set(tilt)
 
 
 def _material(stage, path, color, roughness=.6, metallic=0., texture=None, normal=None, uv_scale=None, emissive=None):

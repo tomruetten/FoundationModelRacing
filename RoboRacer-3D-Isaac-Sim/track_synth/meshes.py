@@ -112,7 +112,8 @@ def stacked_hose_layers(path, rng, radius=.15, flatten=.72, layers=2, sides=24, 
             centre, z = path + left * wander[:, None], rv
         else:
             presence = _stretch_mask(n, rng, upper_fraction, spacing)
-            rh, rv = rh * np.maximum(presence, 1e-3) , rv * np.maximum(presence, 1e-3)
+            # the upper hose is squeezed flatter by its own weight on the first
+            rh, rv = rh * np.maximum(presence, 1e-3), rv * .85 * np.maximum(presence, 1e-3)
             centre = path + left * (wander + .03 * _smooth_noise(n, rng, 20))[:, None]
             z = z_top + rv * .9
         z_top = z + rv

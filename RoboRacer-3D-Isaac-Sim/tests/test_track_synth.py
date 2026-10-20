@@ -55,7 +55,7 @@ def test_upper_layer_only_on_part_of_the_wall():
     (lower, upper), _ = stacked_hose_layers(path, np.random.default_rng(1), layers=2, sides=12, upper_fraction=.4)
     ring = upper['points'][:-2].reshape(301, 12, 3)
     height = ring[..., 2].max(1) - ring[..., 2].min(1)
-    assert .2 < (height > .12).mean() < .8             # stacked hose present on some, not all, of the wall
+    assert .25 < (height > .05).mean() < .75           # stacked hose present on some, not all, of the wall
 
 
 def test_usd_scene_builds(tmp_path):
@@ -119,4 +119,7 @@ def test_build_with_panorama_and_real_floor(tmp_path):
     dome = UsdLux.DomeLight(stage.GetPrimAtPath('/World/Lighting/HallPanorama'))
     assert dome.GetTextureFileAttr().Get().path == './textures/hall_pano.png'
     assert not stage.GetPrimAtPath('/World/Hall/Wall0').IsValid()        # placeholder hall replaced
+    domes = [p for p in stage.Traverse() if p.GetTypeName() == 'DomeLight']
+    assert len(domes) == 1                                                # RTX uses one environment only
+    assert stage.GetPrimAtPath('/World/Lighting/FillSun0').GetTypeName() == 'DistantLight'
     assert (out / 'textures/floor.jpg').exists() and (out / 'textures/hall_pano.png').exists()
