@@ -16,7 +16,7 @@ from .meshes import (stacked_hose_layers, corrugation_normal_map, hose_albedo, c
 
 HOSE_RADIUS = .15      # 30 cm diameter
 HOSE_LAYERS = 2
-HOSE_FLATTEN = .72     # soft hoses sag: vertical / horizontal radius
+HOSE_FLATTEN = .68     # padded hoses are wider than tall: vertical / horizontal radius
 UPPER_LAYER_FRACTION = 1.   # share of the wall length with a second, stacked hose (1 = two layers everywhere)
 HALL_MARGIN = (7., 7.)  # hall extends this far past the map bounds (x, y)
 HALL_HEIGHT = 9.
@@ -33,6 +33,19 @@ REFERENCE = Path(__file__).resolve().parents[1] / 'reference/iros2026'
 FLOOR_TILE_M = 4.096   # real_textures.py: 2048 px at 2 mm
 
 
+def add_fill_lights(stage, light_scale):
+    """Two soft overhead DistantLights (no visible emitter) that brighten hoses and floor.
+
+    Only ONE dome light may exist: RTX uses a single environment, and a second dome replaced the visible
+    panorama (black background). collect.py --fill-scale scales these lights."""
+    from pxr import UsdGeom, UsdLux
+    for k, (tilt, yaw, intensity) in enumerate(((20., 0., 900.), (25., 180., 450.))):
+        sun = UsdLux.DistantLight.Define(stage, f'/World/Lighting/FillSun{k}')
+        sun.CreateAngleAttr(25.); sun.CreateIntensityAttr(intensity * light_scale); sun.CreateColorAttr((1., .96, .90))
+        xf = UsdGeom.Xformable(sun)
+        xf.AddRotateZOp().Set(yaw); xf.AddRotateXOp().Set(tilt)
+
+
 def build_backdrop(stage, geometry, materials, hdri, light_scale, rotate_x, rotate_z):
     """Real-hall panorama (3DGS render) as visible dome + image-based light, large floor plane."""
     from pxr import UsdGeom, UsdLux
@@ -46,14 +59,7 @@ def build_backdrop(stage, geometry, materials, hdri, light_scale, rotate_x, rota
     dome.CreateIntensityAttr(1000. * light_scale)
     xf = UsdGeom.Xformable(dome)
     xf.AddRotateZOp().Set(float(rotate_z)); xf.AddRotateXOp().Set(float(rotate_x))
-    # Only ONE dome light: RTX uses a single environment, a second dome replaced the visible panorama
-    # (black background). Extra light on hoses and floor comes from DistantLights, which have no
-    # visible emitter: two soft overhead "lamps" (collect.py --fill-scale).
-    for k, (tilt, yaw, intensity) in enumerate(((20., 0., 900.), (25., 180., 450.))):
-        sun = UsdLux.DistantLight.Define(stage, f'/World/Lighting/FillSun{k}')
-        sun.CreateAngleAttr(25.); sun.CreateIntensityAttr(intensity * light_scale); sun.CreateColorAttr((1., .96, .90))
-        sxf = UsdGeom.Xformable(sun)
-        sxf.AddRotateZOp().Set(yaw); sxf.AddRotateXOp().Set(tilt)
+    add_fill_lights(stage, light_scale)
 
 
 def _material(stage, path, color, roughness=.6, metallic=0., texture=None, normal=None, uv_scale=None, emissive=None):
@@ -224,6 +230,7 @@ def build_hall(stage, geometry, materials, rng, light_scale=1.):
     # lighting: bright dome (skylights + bounce), ceiling panels, daylight windows high on the walls
     dome = UsdLux.DomeLight.Define(stage, '/World/Lighting/Ambient')
     dome.CreateIntensityAttr(1000. * light_scale); dome.CreateColorAttr((.95, .97, 1.))
+    add_fill_lights(stage, light_scale)
     for i, y in enumerate(np.linspace(Y0 + 6., Y1 - 6., 5)):
         for j, x in enumerate(np.linspace(X0 + 8., X1 - 8., 7)):
             light = UsdLux.RectLight.Define(stage, f'/World/Lighting/Panel{i}_{j}')
@@ -276,9 +283,9 @@ def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1., hose_layers=HOSE_
         wood=M('Wood', color=(.55, .42, .26), roughness=.8),
         dark=M('Dark', color=(.05, .05, .06), roughness=.6),
         grey=M('Grey', color=(.55, .56, .58), roughness=.6))
-    hose = M('Hose', color=(.86, .86, .83), roughness=.8, texture='./textures/hose_albedo.png',
+    hose = M('Hose', color=(.86, .86, .83), roughness=.85, texture='./textures/hose_albedo.png',
              normal='./textures/hose_normal.png')
-    strap = M('Strap', color=(.20, .12, .07), roughness=.7)
+    strap = M('Strap', color=(.16, .09, .05), roughness=.7)
     if hdri:
         build_backdrop(stage, geometry, materials, './textures/hall_pano' + Path(hdri).suffix, light_scale, *dome_rotate)
     else:

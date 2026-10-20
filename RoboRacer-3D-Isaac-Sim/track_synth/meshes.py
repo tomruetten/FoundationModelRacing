@@ -64,13 +64,14 @@ def _smooth_noise(n, rng, scale):
     return out
 
 
-def hose_profile(path_length_points, rng, radius=.15, flatten=.72):
-    """Irregular soft hose: slow width changes, pinched / flattened stretches, random sag."""
+def hose_profile(path_length_points, rng, radius=.15, flatten=.68):
+    """Soft, fat hose (wider than tall, like the padded tubes of the real boundary): gentle width
+    changes only; no pinched stretches."""
     n = path_length_points
     slow = _smooth_noise(n, rng, 25); fast = _smooth_noise(n, rng, 6)
-    rh = radius * (1 + .10 * slow + .03 * fast)
-    pinch = np.clip(.5 * _smooth_noise(n, rng, 14) - .25, -.45, 0)      # occasional strongly flattened stretches
-    rv = radius * flatten * (1 + pinch + .10 * _smooth_noise(n, rng, 20) + .03 * fast)
+    rh = radius * (1 + .04 * slow + .015 * fast)
+    pinch = np.clip(.25 * _smooth_noise(n, rng, 14) - .12, -.15, 0)     # rare mild flattening
+    rv = radius * flatten * (1 + pinch + .04 * _smooth_noise(n, rng, 20) + .015 * fast)
     return np.maximum(rh, .5 * radius), np.maximum(rv, .35 * radius * flatten)
 
 
@@ -90,7 +91,7 @@ def _stretch_mask(n, rng, fraction, spacing=.1, min_m=2., max_m=7., taper_m=.6):
     return np.clip(np.convolve(mask, np.ones(taper) / taper, mode='same') * 1.0, 0, 1)
 
 
-def stacked_hose_layers(path, rng, radius=.15, flatten=.72, layers=2, sides=24, upper_fraction=1.,
+def stacked_hose_layers(path, rng, radius=.15, flatten=.68, layers=2, sides=24, upper_fraction=1.,
                         strap_spacing_m=1.8, spacing=.1):
     """Soft hoses along one wall line, optionally a second layer on top.
 
@@ -104,7 +105,7 @@ def stacked_hose_layers(path, rng, radius=.15, flatten=.72, layers=2, sides=24, 
     tangent = np.gradient(path, axis=0)
     tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
     left = np.c_[-tangent[:, 1], tangent[:, 0]]
-    wander = .03 * _smooth_noise(n, rng, 30)
+    wander = .015 * _smooth_noise(n, rng, 30)
     z_top = np.zeros(n)
     for layer in range(layers):
         rh, rv = hose_profile(n, rng, radius, flatten)
@@ -113,8 +114,8 @@ def stacked_hose_layers(path, rng, radius=.15, flatten=.72, layers=2, sides=24, 
         else:
             presence = _stretch_mask(n, rng, upper_fraction, spacing)
             # the upper hose is squeezed flatter by its own weight on the first
-            rh, rv = rh * np.maximum(presence, 1e-3), rv * .85 * np.maximum(presence, 1e-3)
-            centre = path + left * (wander + .03 * _smooth_noise(n, rng, 20))[:, None]
+            rh, rv = rh * .96 * np.maximum(presence, 1e-3), rv * .92 * np.maximum(presence, 1e-3)
+            centre = path + left * (wander + .012 * _smooth_noise(n, rng, 20))[:, None]
             z = z_top + rv * .9
         z_top = z + rv
         if layer == 0 or presence.max() > 0:
@@ -141,7 +142,7 @@ def _periodic_noise(size, cells_u, cells_v, rng):
     return top * (1 - sv)[:, None] + bottom * sv[:, None]
 
 
-def corrugation_normal_map(size=512, ripples=20, depth=.5, seed=0):
+def corrugation_normal_map(size=512, ripples=14, depth=.16, seed=0):
     """Tangent-space normal map. u runs along the hose (ripples = corrugation rings), v around it.
     Ripple depth and phase wobble with smooth noise, plus random creases and dents."""
     rng = np.random.default_rng(seed)
@@ -150,7 +151,7 @@ def corrugation_normal_map(size=512, ripples=20, depth=.5, seed=0):
     amp = depth * (.75 + .5 * _periodic_noise(size, 4, 4, rng))
     ring = np.cos(2 * np.pi * ripples * u[None, :] + phase)
     slope_u = -amp * ring * .6
-    crumple = _periodic_noise(size, 12, 8, rng) * .25 + _periodic_noise(size, 40, 24, rng) * .12
+    crumple = _periodic_noise(size, 12, 8, rng) * .12 + _periodic_noise(size, 40, 24, rng) * .05
     slope_v = np.gradient(crumple, axis=0) * size / 25
     slope_u = slope_u + np.gradient(crumple, axis=1) * size / 25
     n = np.stack([-slope_u, -slope_v * .5, np.ones_like(slope_u)], -1)
@@ -158,16 +159,16 @@ def corrugation_normal_map(size=512, ripples=20, depth=.5, seed=0):
     return ((n * .5 + .5) * 255).astype(np.uint8)
 
 
-def hose_albedo(size=512, ripples=20, base=(0.94, 0.93, 0.90), seed=0):
+def hose_albedo(size=512, ripples=14, base=(0.90, 0.88, 0.83), seed=0):
     """Bright white fabric hose: ring shading, dirt toward the underside (v ~ 0.75), soft stains."""
     rng = np.random.default_rng(seed + 7)
     u = (np.arange(size) + .5) / size; v = (np.arange(size) + .5) / size
     phase = .35 * _periodic_noise(size, 6, 4, np.random.default_rng(seed))
     ring = np.cos(2 * np.pi * ripples * u[None, :] + phase)
-    shade = .94 + .06 * ring
+    shade = .975 + .025 * ring
     under = np.exp(-.5 * ((((v - .75) + .5) % 1 - .5) / .12) ** 2)[:, None]     # contact with the floor
-    stains = _periodic_noise(size, 8, 6, rng) * .05 + _periodic_noise(size, 30, 20, rng) * .03
-    img = np.array(base)[None, None, :] * (shade + stains)[..., None] * (1 - .22 * under)[..., None]
+    stains = _periodic_noise(size, 8, 6, rng) * .06 + _periodic_noise(size, 30, 20, rng) * .035
+    img = np.array(base)[None, None, :] * (shade + stains)[..., None] * (1 - .30 * under)[..., None]
     img *= 1 + .015 * rng.standard_normal((size, size, 1))
     return (np.clip(img, 0, 1) * 255).astype(np.uint8)
 
