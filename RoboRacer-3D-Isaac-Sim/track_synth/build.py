@@ -116,7 +116,7 @@ def _cylinder(stage, path, center, radius, height, material=None):
         UsdShade.MaterialBindingAPI(cyl).Bind(material)
 
 
-def build_hall(stage, geometry, materials, rng):
+def build_hall(stage, geometry, materials, rng, light_scale=1.):
     """Placeholder industrial hall: floor, walls, roof, beams, columns and clutter outside the track."""
     from pxr import UsdGeom, UsdLux, Gf
     x0, y0, x1, y1 = geometry.bounds
@@ -163,17 +163,17 @@ def build_hall(stage, geometry, materials, rng):
         _cylinder(stage, f'/World/Hall/Tripod{k}', (cx, cy, 1.6), .02, 3.2, materials['dark'])
     # lighting: dim ambient dome + rows of ceiling panels
     dome = UsdLux.DomeLight.Define(stage, '/World/Lighting/Ambient')
-    dome.CreateIntensityAttr(100.); dome.CreateColorAttr((.92, .95, 1.))
+    dome.CreateIntensityAttr(100. * light_scale); dome.CreateColorAttr((.92, .95, 1.))
     for i, y in enumerate(np.linspace(Y0 + 6., Y1 - 6., 5)):
         for j, x in enumerate(np.linspace(X0 + 8., X1 - 8., 7)):
             light = UsdLux.RectLight.Define(stage, f'/World/Lighting/Panel{i}_{j}')
             light.CreateWidthAttr(2.4); light.CreateHeightAttr(.4)
-            light.CreateIntensityAttr(4500.); light.CreateColorAttr((1., .97, .92))
-            xf = UsdGeom.Xformable(light); xf.AddTranslateOp().Set(Gf.Vec3d(x, y, H - .15))
-            xf.AddRotateXOp().Set(180.)  # emit downwards
+            light.CreateIntensityAttr(6000. * light_scale); light.CreateColorAttr((1., .97, .92))
+            # RectLight already emits along local -Z (down): no rotation
+            UsdGeom.Xformable(light).AddTranslateOp().Set(Gf.Vec3d(x, y, H - .15))
 
 
-def build(map_yaml, out_dir, seed=0, sides=24):
+def build(map_yaml, out_dir, seed=0, sides=24, light_scale=1.):
     from pxr import Usd, UsdGeom
     out = Path(out_dir); (out / 'textures').mkdir(parents=True, exist_ok=True)
     geometry = extract(map_yaml)
@@ -198,7 +198,7 @@ def build(map_yaml, out_dir, seed=0, sides=24):
         grey=M('Grey', color=(.55, .56, .58), roughness=.6))
     hose = M('Hose', color=(.86, .86, .83), roughness=.75, texture='./textures/hose_albedo.png',
              normal='./textures/hose_normal.png')
-    build_hall(stage, geometry, materials, rng)
+    build_hall(stage, geometry, materials, rng, light_scale)
     UsdGeom.Xform.Define(stage, '/World/Track')
     for i, wall in enumerate(geometry.walls):
         for layer, mesh in enumerate(stacked_hose_layers(wall, rng, HOSE_RADIUS, layers=HOSE_LAYERS, sides=sides)):
@@ -225,8 +225,9 @@ def main():
     parser.add_argument('--map', required=True, help='ROS map YAML (image: PNG)')
     parser.add_argument('--out', default='outputs/iros2026')
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--light-scale', type=float, default=1., help='multiplies all light intensities (raise if frames are dark)')
     args = parser.parse_args()
-    geometry, usd = build(args.map, args.out, args.seed)
+    geometry, usd = build(args.map, args.out, args.seed, light_scale=args.light_scale)
     length = np.linalg.norm(np.diff(np.vstack([geometry.centerline, geometry.centerline[:1]]), axis=0), axis=1).sum()
     print(f'wrote {usd} | centerline {length:.1f} m | {len(geometry.walls)} hose segments')
 
