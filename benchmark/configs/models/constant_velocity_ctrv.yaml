@@ -1,0 +1,4 @@
+name: constant_velocity_ctrv
+adapter: constant_velocity
+direction: ctrv         # last speed + constant yaw rate (heading history), along the heading
+yaw_rate_window_s: 0.5  # yaw rate from the last 0.5 s

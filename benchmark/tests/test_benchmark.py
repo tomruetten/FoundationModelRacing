@@ -275,3 +275,44 @@ def test_qwen_model_yamls_load():
                                 ("qwen_drive_reasoning_rl", "reasoning_planning", "planner-rl")):
         c = yaml.safe_load((Path(__file__).resolve().parents[1] / "configs/models" / f"{name}.yaml").read_text())
         assert c["name"] == name and c["adapter"] == "qwen_drive" and c["mode"] == mode and c["planner"] == planner
+
+
+def _cv_plan(direction, tmp_path, **cfg):
+    from bench.adapters import create_adapter
+
+    w = make_recording(tmp_path, radius=5.0, speed=2.0)
+    s = build_samples(tmp_path, period_s=0.5)[5]
+    a = create_adapter({"adapter": "constant_velocity", "direction": direction, **cfg}, None)
+    a.load()
+    return a.predict(a.prepare(s, 1), 1).xy[0], s, w
+
+
+def test_constant_velocity_variants_on_a_circle(tmp_path):
+    # circle, v = 2 m/s, r = 5 m: velocity and heading coincide, so all three start the same way
+    for d in ("velocity", "heading", "ctrv"):
+        xy, s, w = _cv_plan(d, tmp_path / d)
+        assert xy.shape == (64, 2) and np.allclose(xy[0], [0.2, 0], atol=0.02)
+    xy_h, s, w = _cv_plan("heading", tmp_path / "h2")
+    xy_c, _, _ = _cv_plan("ctrv", tmp_path / "c2")
+    gt = s.fut_xyz[:, :2]
+    err = lambda p: np.linalg.norm(p - gt, axis=1)
+    assert err(xy_c)[-1] < 0.3 < 1.0 < err(xy_h)[-1]  # constant yaw rate follows the circle, a straight line leaves it
+    assert np.isclose(xy_h[-1, 1], 0)  # heading baseline never moves sideways
+
+
+def test_heading_baseline_ignores_side_slip(tmp_path):
+    from bench.adapters import create_adapter
+    from bench.dataset import Sample
+
+    n = 16  # moving along y (90 deg beside the heading, x axis)
+    hist = np.zeros((n, 3)); hist[:, 1] = np.arange(n) * 0.1 * 1.5
+    hist -= hist[-1]
+    rot = np.tile(np.eye(3), (n, 1, 1))
+    s = Sample(0, 0, 0.0, [], hist.astype(np.float32), rot.astype(np.float32), np.zeros((64, 3), np.float32), 1.5)
+    out = {}
+    for d in ("velocity", "heading"):
+        a = create_adapter({"adapter": "constant_velocity", "direction": d}, None)
+        a.load()
+        out[d] = a.predict(a.prepare(s, 1), 1).xy[0]
+    assert out["velocity"][-1, 0] == pytest.approx(0, abs=1e-6) and out["velocity"][-1, 1] == pytest.approx(9.6, abs=1e-3)
+    assert out["heading"][-1, 0] == pytest.approx(9.6, abs=1e-3) and out["heading"][-1, 1] == pytest.approx(0, abs=1e-6)

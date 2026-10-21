@@ -1,0 +1,3 @@
+name: constant_velocity_heading
+adapter: constant_velocity
+direction: heading      # last speed, straight along the vehicle heading (the fair trivial baseline, see adapter docstring)

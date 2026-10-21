@@ -86,6 +86,12 @@ def _line(ax, xy, color, lw, ls="-", label=None, alpha=1.0, dots=True, z=3):
         ax.plot(xy[9::10, 0], xy[9::10, 1], "o", color=color, ms=3.5, alpha=alpha, zorder=z)
 
 
+def plan_errors(p, gt):
+    """ADE per plan sample (K,) over the waypoints both have: models plan 64 (6.4 s) or 50 (Qwen-Drive, 5 s)."""
+    t = min(p.shape[1], gt.shape[0])
+    return np.linalg.norm(p[:, :t] - gt[None, :t], axis=-1).mean(-1)
+
+
 def draw_topdown(ax, hist, gt, plans, names, ade_txt):
     """Plot with x (forward) up and y (left) to the left, i.e. horizontal axis = -y."""
     T = lambda a: np.column_stack([-a[:, 1], a[:, 0]])
@@ -96,7 +102,7 @@ def draw_topdown(ax, hist, gt, plans, names, ade_txt):
     for r, (p, name) in enumerate(zip(plans, names)):
         c = COLORS[r % len(COLORS)]
         if r == 0:
-            gts = np.linalg.norm(p - gt[None], axis=-1).mean(-1)
+            gts = plan_errors(p, gt)
             for j in range(1, p.shape[0]):
                 _line(ax, T(p[j]), "grey", 1.0, alpha=0.5, dots=False, z=2, label="other samples" if j == 1 else None)
             b = int(gts.argmin())
@@ -139,8 +145,9 @@ def render(sample, i_in_run, runs, cam, out_png: Path):
     names = [r["name"] for r in runs]
     stats = []
     for p, n in zip(plans, names):
-        d = np.linalg.norm(p - gt[None], axis=-1).mean(-1)
-        stats.append(f"{n}: ADE {d[0]:.2f} / minADE {d.min():.2f} m")
+        d = plan_errors(p, gt)
+        horizon = min(p.shape[1], gt.shape[0]) / 10
+        stats.append(f"{n}: ADE {d[0]:.2f} / minADE {d.min():.2f} m" + (f" ({horizon:g} s)" if p.shape[1] < gt.shape[0] else ""))
     title = f"t0 = {sample.t0:.2f} s, speed {sample.speed:.2f} m/s | " + " | ".join(stats)
     img = np.asarray(Image.open(sample.frame_paths[-1]).convert("RGB"))
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(15, 6.2), gridspec_kw={"width_ratios": [1, 1.5]})
