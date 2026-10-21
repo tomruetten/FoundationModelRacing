@@ -60,13 +60,19 @@ class ProfileEngine(RaceEngine):
     curvature-adaptive lookahead ld = clip(0.5 / (1 + 3 |kappa|), 0.3, 2.0), goal = first path point at
     distance >= ld, delta = atan2(2 L sin(alpha), ld). Speed = per-point reference profile (racing line)
     or a constant, clamped to the GRU training range 0.3..2.5 m/s."""
-    def __init__(self, *args, speed=None, lookahead_time=0., **kwargs):
+    def __init__(self, *args, speed=None, lookahead_time=0., yaw_damping=0., steer_filter=0., **kwargs):
         self.profile = None if speed is None else np.asarray(speed, dtype=float)
         self.speed_scale = 1.; self.lookahead_time = lookahead_time
+        self.yaw_damping = yaw_damping; self.steer_filter = steer_filter; self._steer_prev = 0.
         super().__init__(*args, **kwargs)
         if self.profile is not None and len(self.profile) != len(self.path):
             raise ValueError('speed profile and path must have the same number of points')
-        self._kappa = np.abs(curvature(self.path, smooth_m=.3))
+        self._kappa_signed = curvature(self.path, smooth_m=.3)
+        self._kappa = np.abs(self._kappa_signed)
+
+    def reset(self, seed=0):
+        self._steer_prev = 0.
+        return super().reset(seed)
 
     def reference_speed(self, progress):
         if self.profile is None:
@@ -88,6 +94,13 @@ class ProfileEngine(RaceEngine):
         alpha = math.atan2(goal[1] - state.y, goal[0] - state.x) - state.yaw
         alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
         steering = math.atan2(2. * vehicle.WHEELBASE * math.sin(alpha), ld)
+        if self.yaw_damping:          # damp the yaw rate towards the one the path needs (v * kappa)
+            steering -= self.yaw_damping * (state.yr - state.vx * self._kappa_signed[closest])
+        if self.steer_filter:         # first-order lag on the steering command
+            gain = self.dt / (self.steer_filter + self.dt)
+            steering = self._steer_prev + gain * (steering - self._steer_prev)
+        steering = float(np.clip(steering, -vehicle.MAX_STEERING, vehicle.MAX_STEERING))
+        self._steer_prev = steering
         return self._clamp(Command(self.reference_speed(progress), steering))
 
 
@@ -97,7 +110,8 @@ def make_engine(scenario, model, args):
                          outer_boundary=scenario['outer_boundary'], inner_boundaries=scenario['inner_boundaries'],
                          dt=1 / scenario['rates']['dynamics'], opponent_speed=args.speed_max,
                          lookahead=args.lookahead, max_speed=vehicle.SPEED_MAX, max_steering=vehicle.MAX_STEERING,
-                         speed=speed, lookahead_time=args.lookahead_time)
+                         speed=speed, lookahead_time=args.lookahead_time, yaw_damping=args.yaw_damping,
+                         steer_filter=args.steer_filter)
 
 
 def sample_episode(scenario, rng, args):
@@ -282,6 +296,8 @@ def build_parser():
     parser.add_argument('--speed-max', type=float, default=2.0, help='(GRU training range: 0.3 .. 2.5 m/s)')
     parser.add_argument('--lead-in', type=float, default=2.0, help='seconds of driving before the first camera frame')
     parser.add_argument('--lookahead', type=float, default=vehicle.LOOKAHEAD, help=argparse.SUPPRESS)
+    parser.add_argument('--yaw-damping', type=float, default=0., help='steering damping on the yaw-rate error (rad per rad/s)')
+    parser.add_argument('--steer-filter', type=float, default=0., help='steering command low-pass time constant (s)')
     parser.add_argument('--lookahead-time', type=float, default=0.,
                         help='seconds added to the 0.5 m base lookahead per m/s of speed (0 = the repo controller as validated at <= 1 m/s)')
     parser.add_argument('--max-lateral', type=float, default=.15, help='max spawn offset from the driving line (m)')

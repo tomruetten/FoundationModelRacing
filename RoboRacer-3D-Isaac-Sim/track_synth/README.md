@@ -68,7 +68,12 @@ centre line with the GRU (or `--kinematic`) dynamics. Camera = the OAK-D intrins
   0.17-0.27 m); 0.75 (1.6 m/s) ends in contact in 6-7 of 9 episodes, 0.88 and 1.0 in all of them (the car snakes with
   +-1.5 rad/s yaw rate, a longer lookahead helps only a little). The repo validated this controller at 0.8-1.0 m/s.
   So the 77 s lap time of the profile is not reachable with this GRU; the achievable lap is ~130 s.
-  A kinematic model (`--kinematic`) follows the line at full speed.
+  Yaw damping (`--yaw-damping`), steering low-pass and a longer lookahead did not fix it (best: 5/9 contacts at
+  1.9 m/s): the GRU's yaw-rate gain is 1.3-1.6x the bicycle model's at larger steering angles and it produces yaw
+  rates of 3-5 rad/s (physical maximum ~1.8) once the loop oscillates, i.e. the closed loop leaves its training data.
+  A kinematic model follows the line at full speed (8 episodes, `--kinematic --speed-scale-min 0.9 --speed-scale-max 1.0`:
+  2.3-2.5 m/s mean, min hose clearance 0.36 m, no slip modelled). The vehicle itself is not the limit: VESC command
+  range 0-3.5 m/s, GRU training range 0.3-2.5 m/s, Car02 min-time reference up to 2.8 m/s.
 - Collision polygons sit on the hose surface (free-space edge shrunk by hose radius - half line width); the racing line
   keeps 0.28 m between the car side and the hose surface. `trajectory.jsonl` rows carry `hose_clearance_m`,
   `dataset.json` the per-episode minimum.
