@@ -85,9 +85,10 @@ def load_recording(rec_dir: str | Path) -> dict[int, Episode]:
 
 def build_samples(rec_dir: str | Path, num_frames: int = 4, num_history: int = 16, num_future: int = 64,
                   period_s: float = 0.5, max_samples: int | None = None, min_speed: float = 0.0,
-                  frame_tolerance_s: float = 0.04) -> list[Sample]:
+                  frame_tolerance_s: float = 0.04, frame_dt_s: float = DT) -> list[Sample]:
     """Cut samples from a recording, one every `period_s` seconds of sim time (0.1 = consecutive
-    10 Hz windows, required by streaming models)."""
+    10 Hz windows, required by streaming models). The `num_frames` input frames end at t0 and are
+    `frame_dt_s` apart (0.1 s for the Alpamayo models, 0.5 s for Qwen-Drive); poses stay at 10 Hz."""
     rec_dir = Path(rec_dir)
     eps = load_recording(rec_dir)
     frames: dict[int, list[tuple[float, Path]]] = {}
@@ -107,7 +108,7 @@ def build_samples(rec_dir: str | Path, num_frames: int = 4, num_history: int = 1
             t0 = ft[i]
             if t0 < next_t - frame_tolerance_s:
                 continue
-            frame_times = t0 - DT * np.arange(num_frames - 1, -1, -1)
+            frame_times = t0 - frame_dt_s * np.arange(num_frames - 1, -1, -1)
             hist_times = t0 - DT * np.arange(num_history - 1, -1, -1)
             fut_times = t0 + DT * np.arange(1, num_future + 1)
             if hist_times[0] < e.t[0] or fut_times[-1] > e.t[-1] or frame_times[0] < ft[0]:

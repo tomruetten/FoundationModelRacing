@@ -14,7 +14,7 @@ run_tag: track_prompt
 task_prompt: "Drive on the track between the cones on the left and right. Follow the yellow line markings on the ground that show the course of the track and stay between them. Complete one lap as fast as possible."
 # earlier variant (run_tag: lap_prompt): "Complete one lap of the track as fast as possible."
 num_samples: 6           # K trajectory samples per input -> ADE on sample 0, minADE over K
-horizons_s: [2.0, 4.0, 6.4]
+horizons_s: [2.0, 4.0, 5.0, 6.4]   # a horizon beyond the model's plan (Qwen-Drive: 5 s) is reported as NaN
 warmup: 3                # first N predictions are timed but excluded from the statistics
 seed: 42                 # randomness (reasoning tokens, diffusion noise) is seeded per sample from (seed, sample index)
 # seeds: [1, 2, 3]       # or: python run_benchmark.py --seeds 1 2 3  -> one pass per seed + aggregate.md (mean/std over seeds)

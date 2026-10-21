@@ -6,6 +6,7 @@ _REGISTRY = {
     "constant_velocity": ("bench.adapters.constant_velocity", "ConstantVelocityAdapter"),
     "alpamayo": ("bench.adapters.alpamayo", "AlpamayoAdapter"),
     "flashdrive": ("bench.adapters.flashdrive", "FlashDriveAdapter"),
+    "qwen_drive": ("bench.adapters.qwen_drive", "QwenDriveAdapter"),
 }
 
 

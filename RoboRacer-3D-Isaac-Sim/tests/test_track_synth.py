@@ -233,3 +233,10 @@ def test_raceline_keeps_the_car_clear_of_the_hoses(raceline_scene):
     scene = load_scene(raceline_scene)
     from track_synth.build import CLEARANCE
     assert scene['raceline_clearance'].min() >= CLEARANCE + .13 - .02      # hose surface to line >= half width + clearance
+
+
+def test_stale_scene_gets_a_rebuild_hint(tmp_path):
+    import json
+    (tmp_path / 'scenario.json').write_text(json.dumps(dict(usd='track.usd', reference_path=[[0, 0]], half_width=[1.])))
+    with pytest.raises(SystemExit, match='rebuild'):
+        load_scene(tmp_path)

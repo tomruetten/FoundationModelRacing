@@ -27,6 +27,9 @@ def load_scene(scene_dir):
     scene_dir = Path(scene_dir)
     scenario = json.loads((scene_dir / 'scenario.json').read_text())
     scenario['usd_path'] = str((scene_dir / scenario['usd']).resolve())
+    if 'hose_points' not in scenario:
+        raise SystemExit(f"scene {scene_dir} was built by an older track_synth (no hose_points); rebuild it:\n"
+                         f"  python -m track_synth.build --map reference/iros2026/IROS2026.yaml --out {scene_dir}")
     for key in ('reference_path', 'half_width', 'raceline', 'raceline_speed', 'raceline_clearance'):
         if key in scenario:
             scenario[key] = np.asarray(scenario[key], dtype=float)

@@ -1,0 +1,10 @@
+name: qwen_drive_reasoning_rl
+adapter: qwen_drive
+checkpoint: Qwen/Qwen-Drive-1.0-4B   # Hub id (whole snapshot incl. planner-*/ is downloaded) or a local folder
+planner: planner-rl                  # optional: reward-optimised expert (trained on reasoning rollouts only)
+mode: reasoning_planning             # one-sentence greedy reasoning first (decode stage), expert plans from that cache
+views: repeat_front                  # front image in all 3 views (trained on FRONT / FRONT LEFT / FRONT RIGHT); alt: black
+device: cuda
+attn_implementation: sdpa            # as in alpamayo15.yaml; flash_attention_2 needs flash-attn (compare latencies only with equal values)
+# repo: ../Qwen-Drive-1.0            # checkout used when `qwen_drive` is not pip-installed (default: sibling of benchmark/)
+# no free-text prompt, plan = 50 waypoints (5 s), frames 0.5 s apart: see bench/adapters/qwen_drive.py

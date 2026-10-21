@@ -37,6 +37,12 @@ class ModelAdapter(ABC):
     def reset_stream(self) -> None:
         """Called at every episode start (stateful models, e.g. streaming KV caches)."""
 
+    # Spacing of the input frames in seconds; None = 0.1 s (10 Hz) like the pose history. Qwen-Drive needs 0.5 s.
+    frame_spacing_s: float | None = None
+
+    # False if the model has no free-text prompt: the runner then drops `task_prompt` and tags the run `no_prompt`.
+    uses_task_prompt = True
+
     @property
     def required_period_s(self) -> float | None:
         """Sample spacing the model needs (streaming models: 0.1 s consecutive windows), else None."""

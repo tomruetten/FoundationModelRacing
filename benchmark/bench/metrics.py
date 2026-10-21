@@ -24,10 +24,14 @@ def trajectory_metrics(pred_xy: np.ndarray, gt_xy: np.ndarray, horizons_s: list[
         "min_ade": float(d.mean(axis=1).min()),
         "min_fde": float(d[:, -1].min()),
         "num_samples": int(pred_xy.shape[0]),
+        "pred_horizon_s": round(t * DT, 3),  # ade/fde cover this horizon (Qwen-Drive: 5 s, Alpamayo: 6.4 s)
     }
     for h in horizons_s:
-        n = min(int(round(h / DT)), t)
+        n = int(round(h / DT))
         key = f"{h:g}s"
+        if n > t:  # the model does not predict that far: no value instead of a shorter-horizon one
+            out[f"ade@{key}"] = out[f"min_ade@{key}"] = float("nan")
+            continue
         out[f"ade@{key}"] = float(d[0, :n].mean())
         out[f"min_ade@{key}"] = float(d[:, :n].mean(axis=1).min())
     return out

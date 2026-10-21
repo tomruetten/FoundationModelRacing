@@ -1,7 +1,7 @@
 # One-shot benchmark (F1TENTH)
 
 Offline model comparison on a recorded sim run: per sample the model gets the front-camera frames
-(4 @ 10 Hz), the ego history (16 poses @ 10 Hz) and a task prompt, and plans 64 waypoints (6.4 s).
+(4 @ 10 Hz), the ego history (16 poses @ 10 Hz) and a task prompt, and plans 64 waypoints (6.4 s; Qwen-Drive 50 = 5 s).
 Output: latency per stage (vision / prefill / decode / diffusion / other) and ADE / minADE vs. the driven future.
 
 ## 1. Record data (Isaac Sim, GPU machine)
@@ -21,6 +21,38 @@ python run_benchmark.py --model configs/models/constant_velocity.yaml   # no GPU
 python run_benchmark.py --set num_samples=1 --set data.max_samples=20
 ```
 Results land in `results/<model>_<timestamp>/` (`per_sample.csv`, `summary.md/json`, `config.snapshot.yaml`).
+
+## Qwen-Drive-1.0
+Own environment (needs `transformers==5.14.x`, `torch>=2.8`, which the Alpamayo environments do not have):
+```bash
+cd ../Qwen-Drive-1.0 && conda create -n qwen-drive python=3.12 && conda activate qwen-drive
+pip install -r requirements.txt --no-build-isolation      # flash-attn, causal-conv1d, flash-linear-attention
+pip install pyyaml huggingface_hub                        # benchmark side
+hf auth login                                             # if the weights are gated
+cd ../benchmark
+python run_benchmark.py --model configs/models/qwen_drive_direct.yaml
+python run_benchmark.py --model configs/models/qwen_drive_reasoning.yaml
+python run_benchmark.py --model configs/models/qwen_drive_reasoning_rl.yaml   # optional: RL expert, reasoning only
+```
+The weights (`Qwen/Qwen-Drive-1.0-4B`, 9 GB VLM + `planner-sft/`, `planner-rl/`) are fetched from the Hub into the normal
+cache on first use (or point `checkpoint:` at a local folder); the code is imported from `../Qwen-Drive-1.0/src`
+if the package is not pip-installed. `causal-conv1d` and `flash-linear-attention` speed up the Qwen3.5 linear-attention
+layers; without them transformers falls back to slow PyTorch kernels and the latencies are not representative.
+
+What differs from the Alpamayo runs (keep this in mind when comparing and say it in the thesis):
+- **Frames**: 4 per view *0.5 s apart* (t-1.5 .. t0) as in training, not 4 @ 10 Hz (`frame_spacing_s`, set by the adapter).
+  Poses stay at 10 Hz. Samples therefore start 1.5 s into an episode (the pose history needs that anyway).
+- **Views**: the model reads FRONT / FRONT LEFT / FRONT RIGHT. The car has one camera, so `views: repeat_front` feeds the front
+  image into all three (3x image tokens; `views: black` is the alternative). Latency is higher than for a true single view.
+- **Prompt**: no free-text input. `task_prompt` is ignored, the run is tagged `no_prompt` (navigation command: always GO STRAIGHT).
+- **Plan**: 50 waypoints = 5 s. `ade`/`fde` cover 5 s (column `pred_horizon_s`); `ade@6.4s` is NaN. Compare models at `@2s/@4s/@5s`.
+- **Image size**: the model's own resize (history frames <= 174k px, current <= 922k px, 32 px grid), not the sim resolution.
+- **Randomness**: reasoning is greedy; only the expert noise is seeded (`torch.initial_seed()` of the sample, +k per sample).
+- **Timing**: direct = no decode stage; reasoning decode includes the forward that closes the assistant turn. `prepare` (resize,
+  tokenisation, copy to GPU) is outside the latency like for Alpamayo; no CUDA graph / `torch.compile` for Qwen-Drive, Alpamayo
+  runs with the expert CUDA graph, so the diffusion stage is not like for like.
+- `planner-sft` serves both modes with the same weights (clean mode comparison); `planner-rl` was optimised on reasoning rollouts only.
+- Hook module paths (`vlm.model.visual`, `vlm.model.language_model`) are untested on GPU: if a lookup fails the adapter raises with a hint.
 
 ## Seeds and repeated runs
 Reasoning tokens and diffusion noise are random, so two runs of the same configuration differ (about 0.4 m ADE in our

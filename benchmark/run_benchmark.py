@@ -66,6 +66,15 @@ def load_config(config_path: Path, model_override: str | None, overrides: list[s
     return cfg
 
 
+def apply_adapter_defaults(cfg: dict) -> None:
+    """Models without a free-text prompt (Qwen-Drive) run without `task_prompt`; the run is tagged `no_prompt`."""
+    probe = create_adapter(cfg["model_cfg"], cfg.get("task_prompt"))
+    if not probe.uses_task_prompt and cfg.get("task_prompt"):
+        log.warning("%s takes no free-text prompt: task_prompt is ignored, run tag set to 'no_prompt'",
+                    cfg["model_cfg"]["name"])
+        cfg["task_prompt"], cfg["run_tag"] = None, "no_prompt"
+
+
 def gpu_name() -> str:
     try:
         import torch
@@ -148,12 +157,14 @@ def run(cfg: dict, config_dir: Path) -> dict:
     if adapter.required_period_s and dcfg.get("period_s") not in (None, adapter.required_period_s):
         log.warning("%s needs consecutive windows; overriding data.period_s=%s with %s",
                     mcfg["name"], dcfg.get("period_s"), period)
+    frame_dt = adapter.frame_spacing_s or float(dcfg.get("frame_dt_s", 0.1))
     samples = build_samples(_resolve(dcfg["recording"], config_dir), num_frames=int(dcfg.get("num_frames", 4)),
                             period_s=period, max_samples=dcfg.get("max_samples"),
-                            min_speed=float(dcfg.get("min_speed", 0.0)))
+                            min_speed=float(dcfg.get("min_speed", 0.0)), frame_dt_s=frame_dt)
     if not samples:
         raise SystemExit("No samples could be built from the recording (check frames/ and trajectory.jsonl).")
-    log.info("%d samples, period %.2f s, model %s, seeds %s", len(samples), period, mcfg["name"], seeds)
+    log.info("%d samples, period %.2f s, frame spacing %.2f s, model %s, seeds %s", len(samples), period, frame_dt,
+             mcfg["name"], seeds)
 
     tag = f"_{cfg['run_tag']}" if cfg.get("run_tag") else ""
     stamp = f"{datetime.datetime.now():%Y%m%d_%H%M%S}"
@@ -248,6 +259,7 @@ def main() -> None:
         cfg.pop("seeds", None)
     if args.seeds:
         cfg["seeds"] = args.seeds
+    apply_adapter_defaults(cfg)
     if args.out_dir:
         cfg["_out_dir"], cfg["_run_name"] = args.out_dir, args.run_name
     if len(cfg.get("seeds") or []) > 1 or args.resume:

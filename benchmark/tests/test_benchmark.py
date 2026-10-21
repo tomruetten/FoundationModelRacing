@@ -215,3 +215,63 @@ def test_resume_completes_missing_seed(tmp_path):
     assert (root / "seed_1" / "summary.json").stat().st_mtime_ns == before   # finished seeds are not rerun
     assert set(json.loads((root / "aggregate.json").read_text())["metrics"]["ade (m)"]["per_seed"]) == {"1", "2", "3"}
     assert "skipping" in out.stderr
+
+
+def test_metrics_horizon_beyond_plan_is_nan():
+    gt = np.stack([np.arange(64) * 0.1, np.zeros(64)], -1)
+    pred = np.stack([gt[:50] + np.array([0, 1.0])])  # a 5 s plan (Qwen-Drive)
+    m = trajectory_metrics(pred, gt, [2.0, 5.0, 6.4])
+    assert m["pred_horizon_s"] == pytest.approx(5.0) and m["ade"] == pytest.approx(1.0)
+    assert m["ade@5s"] == pytest.approx(1.0)
+    assert np.isnan(m["ade@6.4s"]) and np.isnan(m["min_ade@6.4s"])
+
+
+def test_frame_spacing_half_second(tmp_path):
+    make_recording(tmp_path)
+    s = build_samples(tmp_path, period_s=0.5, frame_dt_s=0.5)
+    assert s, "no samples"
+    import re
+
+    steps = [int(re.search(r"ep0_(\d+)", p.name).group(1)) for p in s[3].frame_paths]
+    assert np.allclose(np.diff(steps) / 50, 0.5, atol=0.04)
+    assert abs(steps[-1] / 50 - s[3].t0) < 0.04
+    assert len(s[3].hist_xyz) == 16  # poses stay at 10 Hz
+
+
+def test_qwen_ego_inputs_circle(tmp_path):
+    from bench.adapters.qwen_drive import ego_inputs
+
+    w = make_recording(tmp_path, radius=5.0, speed=2.0)
+    s = build_samples(tmp_path, period_s=0.5)[5]
+    pose, vel, acc = ego_inputs(s.hist_xyz, s.hist_rot)
+    assert pose.shape == (16, 3) and vel.shape == (16, 2) and acc.shape == (16, 2)
+    assert np.allclose(pose[-1], 0)
+    assert np.allclose(pose[:, 2], np.unwrap(pose[:, 2]))
+    assert pose[0, 2] == pytest.approx(-w * 1.5, abs=1e-3)   # left turn: older headings are negative
+    assert np.allclose(vel[:, 0], 2.0, atol=0.02) and np.allclose(vel[:, 1], 0, atol=0.02)  # body frame
+    # centripetal acceleration points left (+y in the body frame): v^2 / r = 0.8
+    assert np.allclose(acc[2:-1, 1], 0.8, atol=0.05) and np.allclose(acc[2:-1, 0], 0, atol=0.05)
+
+
+def test_qwen_registered_and_prompt_dropped():
+    import run_benchmark as rb
+    from bench.adapters import create_adapter
+
+    a = create_adapter({"adapter": "qwen_drive", "mode": "direct_planning"}, "x")  # lazy: no torch/qwen_drive needed
+    assert a.frame_spacing_s == 0.5 and not a.uses_task_prompt
+    cfg = {"model_cfg": {"name": "q", "adapter": "qwen_drive"}, "task_prompt": "drive", "run_tag": "track_prompt"}
+    rb.apply_adapter_defaults(cfg)
+    assert cfg["task_prompt"] is None and cfg["run_tag"] == "no_prompt"
+    cfg = {"model_cfg": {"name": "cv", "adapter": "constant_velocity"}, "task_prompt": "drive", "run_tag": "t"}
+    rb.apply_adapter_defaults(cfg)
+    assert cfg["task_prompt"] == "drive" and cfg["run_tag"] == "t"
+
+
+def test_qwen_model_yamls_load():
+    import yaml
+
+    for name, mode, planner in (("qwen_drive_direct", "direct_planning", "planner-sft"),
+                                ("qwen_drive_reasoning", "reasoning_planning", "planner-sft"),
+                                ("qwen_drive_reasoning_rl", "reasoning_planning", "planner-rl")):
+        c = yaml.safe_load((Path(__file__).resolve().parents[1] / "configs/models" / f"{name}.yaml").read_text())
+        assert c["name"] == name and c["adapter"] == "qwen_drive" and c["mode"] == mode and c["planner"] == planner
