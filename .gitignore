@@ -8,3 +8,5 @@ _git_backup/
 benchmark/results/
 # recorded sim data (large): copy to the workstation with rsync/scp
 data/
+
+Sim/

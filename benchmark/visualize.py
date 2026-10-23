@@ -92,9 +92,23 @@ def plan_errors(p, gt):
     return np.linalg.norm(p[:, :t] - gt[None, :t], axis=-1).mean(-1)
 
 
-def draw_topdown(ax, hist, gt, plans, names, ade_txt):
-    """Plot with x (forward) up and y (left) to the left, i.e. horizontal axis = -y."""
-    T = lambda a: np.column_stack([-a[:, 1], a[:, 0]])
+def _T(a):
+    """Ego frame (x forward, y left) -> plot axes (horizontal = -y, vertical = x)."""
+    return np.column_stack([-a[:, 1], a[:, 0]])
+
+
+def topdown_limits(items, pad: float = 1.0):
+    """One fixed (xlim, ylim) for the top-down plot of all frames, so the view does not zoom from frame to frame.
+
+    `items` yields (hist, gt, plans) per frame; plans are the (K, T, 2) arrays of every run (sample 0 counts).
+    """
+    pts = np.vstack([_T(a) for hist, gt, plans in items for a in [hist, gt] + [p[0] for p in plans]])
+    return ((pts[:, 0].min() - pad, pts[:, 0].max() + pad), (min(pts[:, 1].min(), -1) - pad, pts[:, 1].max() + pad))
+
+
+def draw_topdown(ax, hist, gt, plans, names, ade_txt, limits):
+    """Plot with x (forward) up and y (left) to the left, i.e. horizontal axis = -y. `limits` = topdown_limits(...)."""
+    T = _T
     ax.add_patch(Rectangle((-CAR_WID / 2, -CAR_LEN / 2), CAR_WID, CAR_LEN, fc="#444", ec="k", zorder=5))
     ax.annotate("", xy=(0, CAR_LEN / 2 + 0.15), xytext=(0, 0), arrowprops=dict(arrowstyle="->", color="w"), zorder=6)
     ax.plot(*T(hist).T, "-o", color="#1f77b4", lw=2, ms=3, label="history 1.5 s", zorder=3)
@@ -115,10 +129,8 @@ def draw_topdown(ax, hist, gt, plans, names, ade_txt):
     ax.set_ylabel("x forward [m]")
     ax.set_title(ade_txt, fontsize=10)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, fontsize=7, frameon=False)
-    pts = np.vstack([T(hist), T(gt)] + [T(p[0]) for p in plans])
-    pad = 1.0
-    ax.set_xlim(pts[:, 0].min() - pad, pts[:, 0].max() + pad)
-    ax.set_ylim(min(pts[:, 1].min(), -1) - pad, pts[:, 1].max() + pad)
+    ax.set_xlim(*limits[0])
+    ax.set_ylim(*limits[1])
 
 
 def draw_camera(ax, img, cam, hist, gt, plans, names):
@@ -139,7 +151,7 @@ def draw_camera(ax, img, cam, hist, gt, plans, names):
     ax.legend(loc="lower left", fontsize=7)
 
 
-def render(sample, i_in_run, runs, cam, out_png: Path):
+def render(sample, i_in_run, runs, cam, out_png: Path, limits):
     hist, gt = sample.hist_xyz[:, :2], sample.fut_xyz[:, :2]
     plans = [r["pred"][r["pos"][i_in_run]] for r in runs]
     names = [r["name"] for r in runs]
@@ -151,10 +163,12 @@ def render(sample, i_in_run, runs, cam, out_png: Path):
     title = f"t0 = {sample.t0:.2f} s, speed {sample.speed:.2f} m/s | " + " | ".join(stats)
     img = np.asarray(Image.open(sample.frame_paths[-1]).convert("RGB"))
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(15, 6.2), gridspec_kw={"width_ratios": [1, 1.5]})
-    draw_topdown(a1, hist, gt, plans, names, "top-down, ego frame at t0")
+    draw_topdown(a1, hist, gt, plans, names, "top-down, ego frame at t0", limits)
     draw_camera(a2, img, cam, hist, gt, plans, names)
     fig.suptitle(title, fontsize=10)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    # fixed margins instead of tight_layout: the layout (and the PNG size) must not depend on legend/title text,
+    # otherwise both panels change size from frame to frame in the video
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.89, bottom=0.17, wspace=0.12)
     fig.savefig(out_png, dpi=90)
     plt.close(fig)
 
@@ -243,10 +257,12 @@ def main() -> None:
 
     out_dir = Path(args.out) if args.out else runs[0]["dir"] / "viz"
     out_dir.mkdir(parents=True, exist_ok=True)
+    limits = topdown_limits((samples[i].hist_xyz[:, :2], samples[i].fut_xyz[:, :2],
+                             [r["pred"][r["pos"][i]] for r in runs]) for i in chosen)
     pngs = []
     for i in chosen:
         png = out_dir / f"sample_{i:03d}.png"
-        render(samples[i], i, runs, cam, png)
+        render(samples[i], i, runs, cam, png, limits)
         pngs.append(png)
     print(f"{len(pngs)} images in {out_dir}")
     if args.video:
